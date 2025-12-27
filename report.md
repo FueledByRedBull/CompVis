@@ -51,6 +51,21 @@ EMOTION_WEIGHTS = {
 - **Accuracy**: ~85-88%
 - **Key Insight**: Different models excel at different emotions; weighted voting leverages each model's strengths
 
+**Weight Tuning Methodology:**
+
+The per-emotion weights were determined through iterative empirical testing:
+
+1. **Initial Assessment**: Each model was tested individually on a set of labeled images to identify strengths:
+   - `enet_b2`: Strong on Happy, Neutral (clear expressions)
+   - `vgaf`: Strong on Sad, Surprise (natural expressions)
+   - `afew`: Strong on Fear, Angry, Disgust (intense expressions)
+
+2. **Weight Assignment**: Weights were assigned based on observed performance, giving higher weight to the model that performed best for each emotion.
+
+3. **Iterative Refinement**: Weights were adjusted through trial runs, observing misclassifications and tweaking values.
+
+**Limitations**: This was not a systematic grid search or cross-validated optimization. Weights are educated estimates based on qualitative observation rather than quantitative metrics on a held-out test set. Further optimization could improve accuracy.
+
 ### Phase 4: Face Detection Migration (MTCNN to dlib)
 
 Originally used MTCNN (facenet-pytorch) for face detection, but migrated to dlib:

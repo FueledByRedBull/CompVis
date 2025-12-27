@@ -13,6 +13,7 @@ import cv2
 import numpy as np
 from pathlib import Path
 import threading
+import time
 import tkinter as tk
 
 from emotion_analyzer import EmotionAnalyzer
@@ -732,6 +733,8 @@ class FacialExpressionGUI:
         if not self.webcam_active or self.webcam_capture is None:
             return
 
+        start_time = time.time()
+
         ret, frame = self.webcam_capture.read()
         if not ret:
             self.status_var.set("Webcam read error")
@@ -749,7 +752,10 @@ class FacialExpressionGUI:
         except Exception as e:
             self.status_var.set(f"Error: {e}")
 
-        self.webcam_job = self.root.after(200, self.process_webcam_frame)
+        # Adaptive delay: maintain ~200ms target, minimum 50ms
+        elapsed_ms = (time.time() - start_time) * 1000
+        delay = max(50, int(200 - elapsed_ms))
+        self.webcam_job = self.root.after(delay, self.process_webcam_frame)
 
     def run(self):
         self.root.mainloop()
