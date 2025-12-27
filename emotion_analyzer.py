@@ -1,5 +1,8 @@
 """Emotion Analyzer - 3-Model Ensemble with dlib 68-point landmarks."""
 
+from collections import Counter
+from typing import Optional, Dict, List, Tuple
+
 import numpy as np
 import cv2
 import dlib
@@ -91,16 +94,14 @@ class EmotionAnalyzer:
             probs = (exp_scores / exp_scores.sum()) * 100
 
             return {label: float(probs[i]) for i, label in enumerate(EMOTION_LABELS)}
-        except:
+        except Exception:
             return None
 
-    def _ensemble_predict(self, face_rgb: np.ndarray) -> tuple[dict, float, dict]:
+    def _ensemble_predict(self, face_rgb: np.ndarray) -> Tuple[Optional[Dict], float, Dict]:
         """
         Weighted ensemble prediction from multiple models with majority voting override.
         Returns: (ensemble_scores, agreement_percentage, model_votes)
         """
-        from collections import Counter
-
         model_scores = {}
         model_votes = {}  # What each model predicted as top emotion
 
@@ -366,7 +367,7 @@ class EmotionAnalyzer:
 
         return refined
 
-    def analyze_image(self, image: np.ndarray) -> list[dict]:
+    def analyze_image(self, image: np.ndarray) -> List[Dict]:
         """Analyze emotions in all faces using dlib."""
         processed = self._preprocess_image(image)
         rgb_image = cv2.cvtColor(processed, cv2.COLOR_BGR2RGB)
@@ -455,9 +456,9 @@ class EmotionAnalyzer:
 
         return analyzed_faces
 
-    def _process_result(self, emotions: dict, region: dict, face_number: int,
+    def _process_result(self, emotions: Dict, region: Dict, face_number: int,
                         agreement: float = 100.0, head_pose: str = "facing camera",
-                        model_votes: dict = None) -> dict:
+                        model_votes: Optional[Dict] = None) -> Dict:
         """Process emotion results into standard format."""
         sorted_emotions = sorted(emotions.items(), key=lambda x: x[1], reverse=True)
 
@@ -499,7 +500,7 @@ class EmotionAnalyzer:
             'model_votes': model_votes or {}
         }
 
-    def draw_emotions(self, image: np.ndarray, analyses: list[dict],
+    def draw_emotions(self, image: np.ndarray, analyses: List[Dict],
                       font_scale: float = 0.7, thickness: int = 2) -> np.ndarray:
         result = image.copy()
         for analysis in analyses:
@@ -513,7 +514,7 @@ class EmotionAnalyzer:
         return result
 
 
-def format_analysis_report(analyses: list[dict], image_name: str) -> str:
+def format_analysis_report(analyses: List[Dict], image_name: str) -> str:
     lines = ["=" * 60, f"FACIAL EXPRESSION ANALYSIS: {image_name}", "=" * 60]
     if not analyses:
         lines.append("\nNo faces detected in this image.")

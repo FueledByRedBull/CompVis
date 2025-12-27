@@ -4,6 +4,8 @@ Built with CustomTkinter for a sleek, modern look.
 Features face enumeration, emotion analysis, and webcam support.
 """
 
+from typing import List, Dict, Optional
+
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 from PIL import Image, ImageTk, ImageDraw, ImageFont
@@ -13,7 +15,7 @@ from pathlib import Path
 import threading
 import tkinter as tk
 
-from emotion_analyzer import EmotionAnalyzer, EMOTION_DESCRIPTIONS
+from emotion_analyzer import EmotionAnalyzer
 
 SUPPORTED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tiff', '.tif'}
 
@@ -317,10 +319,8 @@ class FacialExpressionGUI:
         y = (self.canvas.winfo_height() - pil_image.height) // 2
         self.canvas.create_image(x, y, anchor=tk.NW, image=self.photo)
 
-    def draw_overlays(self, image, analyses):
+    def draw_overlays(self, image: Image.Image, analyses: List[Dict]) -> Image.Image:
         """Draw face boxes with modern effects: Ghost, Glassmorphism, Bracket Corners."""
-        from PIL import ImageFilter
-
         # Create overlay layer for transparency effects
         overlay = Image.new('RGBA', image.size, (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay, 'RGBA')
@@ -329,12 +329,12 @@ class FacialExpressionGUI:
             font_large = ImageFont.truetype("segoeui.ttf", 18)
             font_small = ImageFont.truetype("segoeui.ttf", 12)
             font_number = ImageFont.truetype("segoeuib.ttf", 24)
-        except:
+        except OSError:
             try:
                 font_large = ImageFont.truetype("arial.ttf", 18)
                 font_small = ImageFont.truetype("arial.ttf", 12)
                 font_number = ImageFont.truetype("arialbd.ttf", 24)
-            except:
+            except OSError:
                 font_large = ImageFont.load_default()
                 font_small = font_large
                 font_number = font_large
@@ -371,17 +371,28 @@ class FacialExpressionGUI:
             gap = 8  # Gap between bracket and face box
 
             # Top-left bracket
-            draw.line([(x - gap, y - gap + corner_length), (x - gap, y - gap), (x - gap + corner_length, y - gap)],
-                     fill=(*box_color, alpha), width=bracket_thickness)
+            draw.line(
+                [(x - gap, y - gap + corner_length), (x - gap, y - gap), (x - gap + corner_length, y - gap)],
+                fill=(*box_color, alpha), width=bracket_thickness
+            )
             # Top-right bracket
-            draw.line([(x + w + gap - corner_length, y - gap), (x + w + gap, y - gap), (x + w + gap, y - gap + corner_length)],
-                     fill=(*box_color, alpha), width=bracket_thickness)
+            draw.line(
+                [(x + w + gap - corner_length, y - gap), (x + w + gap, y - gap),
+                 (x + w + gap, y - gap + corner_length)],
+                fill=(*box_color, alpha), width=bracket_thickness
+            )
             # Bottom-left bracket
-            draw.line([(x - gap, y + h + gap - corner_length), (x - gap, y + h + gap), (x - gap + corner_length, y + h + gap)],
-                     fill=(*box_color, alpha), width=bracket_thickness)
+            draw.line(
+                [(x - gap, y + h + gap - corner_length), (x - gap, y + h + gap),
+                 (x - gap + corner_length, y + h + gap)],
+                fill=(*box_color, alpha), width=bracket_thickness
+            )
             # Bottom-right bracket
-            draw.line([(x + w + gap - corner_length, y + h + gap), (x + w + gap, y + h + gap), (x + w + gap, y + h + gap - corner_length)],
-                     fill=(*box_color, alpha), width=bracket_thickness)
+            draw.line(
+                [(x + w + gap - corner_length, y + h + gap), (x + w + gap, y + h + gap),
+                 (x + w + gap, y + h + gap - corner_length)],
+                fill=(*box_color, alpha), width=bracket_thickness
+            )
 
             # Subtle inner box outline
             draw.rectangle([x, y, x + w, y + h], outline=(*box_color, alpha // 2), width=1)
@@ -492,7 +503,7 @@ class FacialExpressionGUI:
 
         return image
 
-    def display_results(self, analyses):
+    def display_results(self, analyses: List[Dict]) -> None:
         """Display results in the side panel."""
         # Clear previous
         for widget in self.results_scroll.winfo_children():

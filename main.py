@@ -3,7 +3,10 @@
 import argparse
 import sys
 from pathlib import Path
+from typing import Optional, Dict, List, Union
+
 import cv2
+import numpy as np
 
 from emotion_analyzer import EmotionAnalyzer, format_analysis_report
 
@@ -12,7 +15,7 @@ from emotion_analyzer import EmotionAnalyzer, format_analysis_report
 SUPPORTED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tiff', '.tif'}
 
 
-def load_image(image_path: str | Path):
+def load_image(image_path: Union[str, Path]) -> Optional[np.ndarray]:
     """Load an image from disk. Returns BGR numpy array or None."""
     image_path = Path(image_path)
 
@@ -29,7 +32,7 @@ def load_image(image_path: str | Path):
     return image
 
 
-def get_image_files(directory: Path) -> list[Path]:
+def get_image_files(directory: Path) -> List[Path]:
     """Get all supported image files from a directory."""
     image_files = []
 
@@ -40,8 +43,8 @@ def get_image_files(directory: Path) -> list[Path]:
     return sorted(image_files)
 
 
-def analyze_directory(directory: str, output_dir: str | None = None,
-                      save_annotated: bool = False, verbose: bool = True) -> dict:
+def analyze_directory(directory: str, output_dir: Optional[str] = None,
+                      save_annotated: bool = False, verbose: bool = True) -> Dict:
     """Analyze all images in a directory for facial expressions."""
     dir_path = Path(directory)
 
@@ -135,7 +138,7 @@ def analyze_directory(directory: str, output_dir: str | None = None,
     return all_results
 
 
-def analyze_single_image(image_path: str, save_annotated: bool = False) -> dict | None:
+def analyze_single_image(image_path: str, save_annotated: bool = False) -> Optional[Dict]:
     """Analyze a single image for facial expressions."""
     path = Path(image_path)
 
@@ -170,7 +173,8 @@ def analyze_single_image(image_path: str, save_annotated: bool = False) -> dict 
     }
 
 
-def main():
+def main() -> None:
+    """CLI entry point for facial expression analysis."""
     parser = argparse.ArgumentParser(description='Analyze facial expressions in images')
 
     parser.add_argument(
