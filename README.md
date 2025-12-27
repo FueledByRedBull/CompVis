@@ -264,6 +264,26 @@ pip install dlib-bin
 
 ---
 
+## Docker (Recommended for Easy Setup)
+
+Skip all the dlib compilation hassle by using Docker:
+
+```bash
+# Build the image (downloads shape predictor automatically)
+docker build -t emotion-analyzer .
+
+# Analyze images in a folder
+docker run -v /path/to/images:/data emotion-analyzer python main.py /data
+
+# Save results
+docker run -v /path/to/images:/data -v /path/to/output:/output \
+    emotion-analyzer python main.py /data --output /output --save-annotated
+```
+
+> **Note:** GUI mode (`gui_app.py`) requires X11 forwarding and is not recommended in Docker.
+
+---
+
 ## Usage
 
 ### GUI Application (Recommended)

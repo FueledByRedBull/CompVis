@@ -41,6 +41,32 @@ EMOTION_WEIGHTS = {
 HIGH_CONFIDENCE = 60.0
 MEDIUM_CONFIDENCE = 40.0
 
+# Detection thresholds (normalized values for scale-invariance)
+THRESHOLDS = {
+    # Head pose detection (nose offset / eye distance)
+    'head_pose_left': -0.15,
+    'head_pose_right': 0.15,
+
+    # Mouth opening ratio (lip gap / mouth width)
+    'mouth_open': 0.12,
+    'mouth_wide_open': 0.18,
+    'mouth_closed': 0.05,
+
+    # Mouth corners (corner offset / eye distance)
+    'corners_upturned': -0.03,
+    'corners_downturned': 0.05,
+
+    # Emotion refinement score differences
+    'fear_surprise_diff': 35,
+    'fear_surprise_close': 15,
+    'sad_angry_diff': 25,
+    'sad_angry_intensity': 20,
+    'angry_sad_diff': 10,
+
+    # Ambiguity detection
+    'ambiguous_gap': 12,
+}
+
 
 class EmotionAnalyzer:
     """3-model ensemble emotion analyzer with dlib landmarks."""
@@ -200,9 +226,9 @@ class EmotionAnalyzer:
         nose_offset = (nose_tip[0] - eye_center[0]) / eye_dist
 
         # Thresholds for pose detection
-        if nose_offset < -0.15:
+        if nose_offset < THRESHOLDS['head_pose_left']:
             return "turned left"
-        elif nose_offset > 0.15:
+        elif nose_offset > THRESHOLDS['head_pose_right']:
             return "turned right"
         return "facing camera"
 
@@ -239,9 +265,9 @@ class EmotionAnalyzer:
         # Thresholds based on 68-point landmark geometry
         # Negative offset = corners above center = smile
         # Positive offset = corners below center = frown
-        if normalized_offset < -0.03:
+        if normalized_offset < THRESHOLDS['corners_upturned']:
             return "upturned"
-        elif normalized_offset > 0.05:
+        elif normalized_offset > THRESHOLDS['corners_downturned']:
             return "downturned"
         else:
             return "neutral"
@@ -269,16 +295,16 @@ class EmotionAnalyzer:
             mouth_ratio = self._analyze_mouth_opening(landmarks) if landmarks is not None else 0.1
 
             # ANY mouth opening suggests surprise over fear
-            if mouth_ratio > 0.12:  # Even slightly open mouth → surprise
+            if mouth_ratio > THRESHOLDS['mouth_open']:
                 boost = min(40, emotions['fear'] * 0.8)
                 refined['surprise'] = emotions['surprise'] + boost
                 refined['fear'] = emotions['fear'] - boost * 0.9
 
             # Strong bias toward surprise - fear is rare in posed photos
             fear_surprise_diff = emotions['fear'] - emotions['surprise']
-            if fear_surprise_diff < 35:  # Widened from 25
+            if fear_surprise_diff < THRESHOLDS['fear_surprise_diff']:
                 # Always bias toward surprise when close
-                bias = 20 if fear_surprise_diff < 15 else 15
+                bias = 20 if fear_surprise_diff < THRESHOLDS['fear_surprise_close'] else 15
                 refined['surprise'] = refined.get('surprise', emotions['surprise']) + bias
                 refined['fear'] = refined.get('fear', emotions['fear']) - bias * 0.7
 
@@ -287,7 +313,7 @@ class EmotionAnalyzer:
             mouth_ratio = self._analyze_mouth_opening(landmarks) if landmarks is not None else 0.1
 
             # Only flip to fear if mouth is CLEARLY closed AND fear score is very high
-            if mouth_ratio < 0.05 and emotions['fear'] > 45:
+            if mouth_ratio < THRESHOLDS['mouth_closed'] and emotions['fear'] > 45:
                 boost = min(10, emotions['surprise'] * 0.2)
                 refined['fear'] = emotions['fear'] + boost
                 refined['surprise'] = emotions['surprise'] - boost * 0.3
@@ -307,13 +333,13 @@ class EmotionAnalyzer:
 
             # Disgust typically has closed/compressed mouth (upper lip raised)
             if top_emotion == 'angry' and emotions.get('disgust', 0) > 15:
-                if mouth_ratio < 0.12:  # Compressed/closed mouth suggests disgust
+                if mouth_ratio < THRESHOLDS['mouth_open']:
                     boost = min(15, emotions['angry'] * 0.3)
                     refined['disgust'] = emotions['disgust'] + boost
                     refined['angry'] = emotions['angry'] - boost * 0.5
 
             if top_emotion == 'disgust' and emotions.get('angry', 0) > 15:
-                if mouth_ratio > 0.18:  # More open mouth suggests angry over disgust
+                if mouth_ratio > THRESHOLDS['mouth_wide_open']:
                     boost = min(15, emotions['disgust'] * 0.3)
                     refined['angry'] = emotions['angry'] + boost
                     refined['disgust'] = emotions['disgust'] - boost * 0.5
@@ -330,20 +356,20 @@ class EmotionAnalyzer:
 
             # INTENSITY CHECK: Low-confidence sad → probably angry
             # Angry expressions are typically more intense/confident looking
-            if top_score < 60 and sad_angry_diff < 20:
+            if top_score < 60 and sad_angry_diff < THRESHOLDS['sad_angry_intensity']:
                 boost = min(20, emotions['sad'] * 0.4)
                 refined['angry'] = emotions['angry'] + boost
                 refined['sad'] = emotions['sad'] - boost * 0.7
 
             # MOUTH CORNER CHECK: If mouth is NOT clearly downturned → probably angry
             # Only keep as sad if mouth is clearly drooping
-            if mouth_corners != "downturned" and sad_angry_diff < 25:
+            if mouth_corners != "downturned" and sad_angry_diff < THRESHOLDS['sad_angry_diff']:
                 boost = min(18, emotions['sad'] * 0.35)
                 refined['angry'] = emotions['angry'] + boost
                 refined['sad'] = emotions['sad'] - boost * 0.6
 
             # ANGRY CLUSTER CHECK: If disgust is also present, suggests anger family
-            if emotions.get('disgust', 0) > 10 and sad_angry_diff < 20:
+            if emotions.get('disgust', 0) > 10 and sad_angry_diff < THRESHOLDS['sad_angry_intensity']:
                 boost = min(12, emotions['sad'] * 0.25)
                 refined['angry'] = emotions['angry'] + boost
                 refined['sad'] = emotions['sad'] - boost * 0.5
@@ -355,7 +381,7 @@ class EmotionAnalyzer:
             # Only flip to sad if mouth is clearly downturned AND scores are close
             if mouth_corners == "downturned":
                 angry_sad_diff = emotions['angry'] - emotions['sad']
-                if angry_sad_diff < 10:  # Tightened from 15
+                if angry_sad_diff < THRESHOLDS['angry_sad_diff']:
                     boost = min(8, emotions['angry'] * 0.15)
                     refined['sad'] = emotions['sad'] + boost
                     refined['angry'] = emotions['angry'] - boost * 0.3
@@ -475,7 +501,7 @@ class EmotionAnalyzer:
             confidence_level = 'low'
 
         experience = EMOTION_DESCRIPTIONS.get(dominant_emotion, dominant_emotion)
-        is_ambiguous = (dominant_score - secondary_score) < 12 and secondary_score > 20
+        is_ambiguous = (dominant_score - secondary_score) < THRESHOLDS['ambiguous_gap'] and secondary_score > 20
 
         return {
             'face_number': face_number,
