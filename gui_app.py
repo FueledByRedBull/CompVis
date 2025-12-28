@@ -216,6 +216,7 @@ class FacialExpressionGUI:
             self.root.after(0, lambda: messagebox.showerror("Error", f"Failed to initialize: {e}"))
 
     def select_folder(self):
+        """Open folder dialog and load images for analysis."""
         folder = filedialog.askdirectory(title="Select Image Folder")
         if not folder:
             return
@@ -236,6 +237,7 @@ class FacialExpressionGUI:
         self.load_and_analyze_current()
 
     def update_navigation(self):
+        """Update navigation buttons and image counter based on current state."""
         total = len(self.image_files)
         current = self.current_index + 1 if total > 0 else 0
 
@@ -245,18 +247,21 @@ class FacialExpressionGUI:
         self.progress_label.configure(text=f"{current}/{total} images")
 
     def prev_image(self):
+        """Navigate to the previous image in the folder."""
         if self.current_index > 0:
             self.current_index -= 1
             self.update_navigation()
             self.load_and_analyze_current()
 
     def next_image(self):
+        """Navigate to the next image in the folder."""
         if self.current_index < len(self.image_files) - 1:
             self.current_index += 1
             self.update_navigation()
             self.load_and_analyze_current()
 
     def load_and_analyze_current(self):
+        """Load the current image and start analysis in a background thread."""
         if not self.image_files or self.analyzer is None:
             return
 
@@ -275,6 +280,7 @@ class FacialExpressionGUI:
         threading.Thread(target=self.analyze_current, daemon=True).start()
 
     def analyze_current(self):
+        """Run emotion analysis on the current image (called from background thread)."""
         if self.current_image is None or self.analyzer is None:
             return
 
@@ -285,6 +291,7 @@ class FacialExpressionGUI:
             self.root.after(0, lambda: self.status_var.set(f"Error: {e}"))
 
     def show_results(self, analyses):
+        """Update display with analysis results after processing completes."""
         self.current_analyses = analyses
         self.display_image(self.current_image, analyses)
         self.display_results(analyses)
@@ -670,12 +677,14 @@ class FacialExpressionGUI:
         ).pack(side="left")
 
     def toggle_webcam(self):
+        """Toggle webcam capture on or off."""
         if self.webcam_active:
             self.stop_webcam()
         else:
             self.start_webcam()
 
     def start_webcam(self):
+        """Initialize webcam capture and begin frame processing loop."""
         if self.analyzer is None:
             messagebox.showwarning("Not Ready", "Please wait for analyzer to initialize.")
             return
@@ -701,6 +710,7 @@ class FacialExpressionGUI:
             self.stop_webcam()
 
     def stop_webcam(self):
+        """Stop webcam capture and restore UI to folder mode."""
         self.webcam_active = False
 
         if self.webcam_job:
@@ -730,6 +740,7 @@ class FacialExpressionGUI:
             self.update_navigation()
 
     def process_webcam_frame(self):
+        """Capture and analyze a single webcam frame with adaptive timing."""
         if not self.webcam_active or self.webcam_capture is None:
             return
 
@@ -758,10 +769,12 @@ class FacialExpressionGUI:
         self.webcam_job = self.root.after(delay, self.process_webcam_frame)
 
     def run(self):
+        """Start the Tkinter main event loop."""
         self.root.mainloop()
 
 
 def main():
+    """Application entry point."""
     app = FacialExpressionGUI()
     app.run()
 

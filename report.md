@@ -171,7 +171,12 @@ Implemented modern visual effects in the CustomTkinter GUI:
 - Some cultures express emotions differently
 - May introduce bias for certain demographics
 
-### 7. Single Frame Analysis
+### 7. Training Data Bias
+- Pre-trained models may not represent all demographics equally
+- Potential accuracy variations across different ethnic groups, ages, or genders
+- No control over original training dataset composition
+
+### 8. Single Frame Analysis
 - No temporal smoothing for video
 - Frame-to-frame predictions can fluctuate
 - Webcam mode shows this instability
