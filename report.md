@@ -207,47 +207,54 @@ python main.py -i photo.jpg -q
 
 ---
 
+## Addressed Limitations
+
+The following limitations from earlier versions have been resolved:
+
+### Adaptive Thresholds
+- Thresholds now scale based on face size (eye distance)
+- `_get_scale_factor()` method normalizes for different face distances
+- Better generalization across varying face sizes and camera distances
+
+### Temporal Smoothing
+- Rolling average of last 5 frames in webcam/video mode
+- Reduces frame-to-frame prediction fluctuation
+- Enable with `analyze_image(image, smooth=True)`
+- `clear_history()` method resets smoothing when switching sources
+
+---
+
 ## Weaknesses
 
-### 1. Static Threshold Limitations
-- Mouth opening threshold (0.12) is fixed
-- May not generalize across all face sizes/angles
-- Individual variation in facial proportions not accounted for
-
-### 2. Contempt Detection
+### 1. Contempt Detection
 - 8th emotion (Contempt) is least reliable
 - Limited training data in most emotion datasets
 - Often confused with Neutral or Disgust
 
-### 3. Lighting Sensitivity
+### 2. Lighting Sensitivity
 - Despite CLAHE preprocessing, extreme lighting affects accuracy
 - Backlit subjects particularly problematic
 - Color temperature variations can impact detection
 
-### 4. Profile Face Limitations
+### 3. Profile Face Limitations
 - Accuracy drops significantly for non-frontal faces
 - Head pose estimation helps identify this, but doesn't fix it
 - 68-point landmarks require mostly frontal view
 
-### 5. Micro-Expression Detection
+### 4. Micro-Expression Detection
 - System optimized for posed/clear expressions
 - Subtle or fleeting emotions often missed
 - Real-world spontaneous expressions less accurate than posed photos
 
-### 6. Cultural Expression Variations
+### 5. Cultural Expression Variations
 - Training data may not represent all cultural expression norms
 - Some cultures express emotions differently
 - May introduce bias for certain demographics
 
-### 7. Training Data Bias
+### 6. Training Data Bias
 - Pre-trained models may not represent all demographics equally
 - Potential accuracy variations across different ethnic groups, ages, or genders
 - No control over original training dataset composition
-
-### 8. Single Frame Analysis
-- No temporal smoothing for video
-- Frame-to-frame predictions can fluctuate
-- Webcam mode shows this instability
 
 ---
 

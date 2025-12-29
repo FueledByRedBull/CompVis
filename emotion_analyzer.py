@@ -1,6 +1,6 @@
 """Emotion Analyzer - 3-Model Ensemble with dlib 68-point landmarks."""
 
-from collections import Counter
+from collections import Counter, deque
 from typing import Optional, Dict, List, Tuple
 
 import numpy as np
@@ -100,6 +100,10 @@ class EmotionAnalyzer:
         }
         print(f"Loaded {len(self.models)} models: {', '.join(self.models.keys())}")
 
+        # Temporal smoothing for video/webcam mode
+        self.emotion_history = {}  # Per-face emotion history
+        self.history_size = 5      # Number of frames to average
+
     def _preprocess_image(self, image: np.ndarray) -> np.ndarray:
         """Apply CLAHE preprocessing."""
         lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
@@ -108,6 +112,42 @@ class EmotionAnalyzer:
         l = clahe.apply(l)
         lab = cv2.merge([l, a, b])
         return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+
+    def _smooth_emotions(self, face_id: int, emotions: dict) -> dict:
+        """Apply temporal smoothing using rolling average of last N frames."""
+        if face_id not in self.emotion_history:
+            self.emotion_history[face_id] = deque(maxlen=self.history_size)
+
+        self.emotion_history[face_id].append(emotions.copy())
+
+        # Need at least 2 frames for smoothing
+        if len(self.emotion_history[face_id]) < 2:
+            return emotions
+
+        # Calculate rolling average
+        smoothed = {}
+        for emotion in EMOTION_LABELS:
+            values = [h[emotion] for h in self.emotion_history[face_id]]
+            smoothed[emotion] = np.mean(values)
+
+        return smoothed
+
+    def _get_scale_factor(self, landmarks: np.ndarray) -> float:
+        """Get scale factor based on face size (eye distance) for adaptive thresholds."""
+        if landmarks is None or len(landmarks) < 68:
+            return 1.0
+
+        left_eye = landmarks[36:42].mean(axis=0)
+        right_eye = landmarks[42:48].mean(axis=0)
+        eye_dist = np.linalg.norm(right_eye - left_eye)
+
+        # Reference: 60px eye distance = scale 1.0
+        # Clamp between 0.5 and 2.0 to avoid extreme values
+        return max(0.5, min(2.0, eye_dist / 60))
+
+    def clear_history(self):
+        """Clear emotion history (call when switching images/videos)."""
+        self.emotion_history.clear()
 
     def _get_emotion_scores(self, face_rgb: np.ndarray, model_name: str) -> dict:
         """Get emotion scores from a single model."""
@@ -393,8 +433,13 @@ class EmotionAnalyzer:
 
         return refined
 
-    def analyze_image(self, image: np.ndarray) -> List[Dict]:
-        """Analyze emotions in all faces using dlib."""
+    def analyze_image(self, image: np.ndarray, smooth: bool = False) -> List[Dict]:
+        """Analyze emotions in all faces using dlib.
+
+        Args:
+            image: Input image (BGR format)
+            smooth: Enable temporal smoothing for video/webcam mode
+        """
         processed = self._preprocess_image(image)
         rgb_image = cv2.cvtColor(processed, cv2.COLOR_BGR2RGB)
         gray = cv2.cvtColor(processed, cv2.COLOR_BGR2GRAY)
@@ -462,6 +507,11 @@ class EmotionAnalyzer:
 
                 # Apply refinements
                 emotions = self._refine_emotions(emotions, face_landmarks)
+
+                # Apply temporal smoothing for video/webcam mode
+                if smooth:
+                    face_id = idx  # Use position-based ID for tracking
+                    emotions = self._smooth_emotions(face_id, emotions)
 
                 # Estimate head pose
                 head_pose = self._estimate_head_pose(face_landmarks)
