@@ -379,14 +379,12 @@ The `_refine_emotions()` method applies these corrections in sequence:
 ## Future Improvements
 
 ### Short-term
-1. Implement temporal smoothing for webcam mode
-2. Add confidence thresholding to reject uncertain predictions
-3. Improve Contempt detection with additional training
+1. Add confidence thresholding to reject uncertain predictions
+2. Improve Contempt detection with additional training
 
 ### Medium-term
 1. Add support for side-profile faces
-2. Implement adaptive thresholds based on face size
-3. Add batch processing for video files
+2. Add batch processing for video files
 
 ### Long-term
 1. Train custom model on diverse dataset
