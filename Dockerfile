@@ -16,8 +16,9 @@ WORKDIR /app
 
 # Copy requirements first for layer caching
 COPY requirements.txt .
-# Install dlib from source first (dlib-bin in requirements.txt is Windows-only)
-RUN pip install --no-cache-dir dlib && pip install --no-cache-dir -r requirements.txt
+# Replace dlib-bin with dlib for Linux (dlib-bin is Windows-only)
+RUN sed -i 's/dlib-bin/dlib/' requirements.txt && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY emotion_analyzer.py .
