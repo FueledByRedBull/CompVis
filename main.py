@@ -14,6 +14,9 @@ from emotion_analyzer import EmotionAnalyzer, format_analysis_report
 # Supported image extensions
 SUPPORTED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tiff', '.tif'}
 
+# Supported video extensions
+SUPPORTED_VIDEO_EXTENSIONS = {'.mp4', '.avi', '.mov', '.mkv', '.webm'}
+
 
 def load_image(image_path: Union[str, Path]) -> Optional[np.ndarray]:
     """Load an image from disk. Returns BGR numpy array or None."""
@@ -138,6 +141,58 @@ def analyze_directory(directory: str, output_dir: Optional[str] = None,
     return all_results
 
 
+def analyze_video_file(video_path: str, output_path: Optional[str] = None,
+                       skip_frames: int = 1, verbose: bool = True) -> Optional[Dict]:
+    """Analyze a video file for facial expressions."""
+    path = Path(video_path)
+
+    if not path.exists():
+        print(f"Error: Video not found: {video_path}")
+        return None
+
+    if path.suffix.lower() not in SUPPORTED_VIDEO_EXTENSIONS:
+        print(f"Error: Unsupported video format: {path.suffix}")
+        print(f"Supported formats: {', '.join(SUPPORTED_VIDEO_EXTENSIONS)}")
+        return None
+
+    print("Initializing emotion analyzer...")
+    analyzer = EmotionAnalyzer(use_ensemble=True)
+
+    # Determine output path
+    out_path = None
+    if output_path:
+        out_path = output_path
+
+    print(f"Analyzing video: {path.name}")
+    if skip_frames > 1:
+        print(f"Processing every {skip_frames} frame(s)")
+    print()
+
+    results = analyzer.analyze_video(
+        str(path),
+        output_path=out_path,
+        skip_frames=skip_frames,
+        show_progress=verbose
+    )
+
+    # Print summary
+    if verbose:
+        print("\n" + "=" * 60)
+        print("VIDEO ANALYSIS COMPLETE")
+        print("=" * 60)
+        total_faces = sum(len(r.get('faces', [])) for r in results)
+        print(f"Frames processed: {len(results)}")
+        print(f"Total face detections: {total_faces}")
+        if out_path:
+            print(f"Annotated video saved to: {out_path}")
+
+    return {
+        'filename': path.name,
+        'frames_processed': len(results),
+        'results': results
+    }
+
+
 def analyze_single_image(image_path: str, save_annotated: bool = False) -> Optional[Dict]:
     """Analyze a single image for facial expressions."""
     path = Path(image_path)
@@ -205,9 +260,29 @@ def main() -> None:
         help='Reduce output verbosity'
     )
 
+    parser.add_argument(
+        '--video', '-v',
+        action='store_true',
+        help='Analyze a video file instead of images'
+    )
+
+    parser.add_argument(
+        '--skip-frames',
+        type=int,
+        default=1,
+        help='Process every Nth frame in video mode (default: 1)'
+    )
+
     args = parser.parse_args()
 
-    if args.single:
+    if args.video:
+        analyze_video_file(
+            args.path,
+            output_path=args.output,
+            skip_frames=args.skip_frames,
+            verbose=not args.quiet
+        )
+    elif args.single:
         analyze_single_image(args.path, save_annotated=args.save_annotated)
     else:
         analyze_directory(

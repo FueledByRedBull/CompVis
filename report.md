@@ -222,6 +222,19 @@ The following limitations from earlier versions have been resolved:
 - Enable with `analyze_image(image, smooth=True)`
 - `clear_history()` method resets smoothing when switching sources
 
+### Confidence Thresholding
+- Predictions below 30% confidence can be rejected as uncertain
+- Enable with `analyze_image(image, reject_low_confidence=True)`
+- Reduces false positives from ambiguous expressions
+- Configurable threshold via `min_confidence` attribute
+
+### Video Batch Processing
+- Full video file support with `analyze_video()` method
+- Frame skipping for faster processing (`skip_frames` parameter)
+- Automatic temporal smoothing across video frames
+- Optional annotated video output with emotion overlays
+- CLI support: `python main.py -v video.mp4 -o output.mp4 --skip-frames 2`
+
 ---
 
 ## Weaknesses
@@ -379,12 +392,10 @@ The `_refine_emotions()` method applies these corrections in sequence:
 ## Future Improvements
 
 ### Short-term
-1. Add confidence thresholding to reject uncertain predictions
-2. Improve Contempt detection with additional training
+1. Improve Contempt detection with additional training
 
 ### Medium-term
 1. Add support for side-profile faces
-2. Add batch processing for video files
 
 ### Long-term
 1. Train custom model on diverse dataset

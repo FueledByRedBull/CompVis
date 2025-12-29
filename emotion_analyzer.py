@@ -104,6 +104,9 @@ class EmotionAnalyzer:
         self.emotion_history = {}  # Per-face emotion history
         self.history_size = 5      # Number of frames to average
 
+        # Confidence thresholding
+        self.min_confidence = 30.0  # Reject predictions below this threshold
+
     def _preprocess_image(self, image: np.ndarray) -> np.ndarray:
         """Apply CLAHE preprocessing."""
         lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
@@ -433,12 +436,14 @@ class EmotionAnalyzer:
 
         return refined
 
-    def analyze_image(self, image: np.ndarray, smooth: bool = False) -> List[Dict]:
+    def analyze_image(self, image: np.ndarray, smooth: bool = False,
+                      reject_low_confidence: bool = False) -> List[Dict]:
         """Analyze emotions in all faces using dlib.
 
         Args:
             image: Input image (BGR format)
             smooth: Enable temporal smoothing for video/webcam mode
+            reject_low_confidence: Filter out faces with confidence below min_confidence
         """
         processed = self._preprocess_image(image)
         rgb_image = cv2.cvtColor(processed, cv2.COLOR_BGR2RGB)
@@ -524,6 +529,11 @@ class EmotionAnalyzer:
                     head_pose=head_pose,
                     model_votes=model_votes
                 )
+
+                # Filter out low-confidence predictions if requested
+                if reject_low_confidence and face_data['confidence'] < self.min_confidence:
+                    continue
+
                 analyzed_faces.append(face_data)
 
             except Exception as e:
@@ -531,6 +541,78 @@ class EmotionAnalyzer:
                 continue
 
         return analyzed_faces
+
+    def analyze_video(self, video_path: str, output_path: str = None,
+                      skip_frames: int = 1, reject_low_confidence: bool = False,
+                      show_progress: bool = True) -> List[Dict]:
+        """Process video file frame-by-frame with temporal smoothing.
+
+        Args:
+            video_path: Path to input video file
+            output_path: Optional path to save annotated video
+            skip_frames: Process every Nth frame (1 = all frames)
+            reject_low_confidence: Filter out low-confidence predictions
+            show_progress: Print progress updates
+
+        Returns:
+            List of frame analysis results
+        """
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise ValueError(f"Could not open video: {video_path}")
+
+        # Get video properties
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+        # Setup output video writer if saving
+        out = None
+        if output_path:
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(output_path, fourcc, fps / skip_frames, (width, height))
+
+        results = []
+        frame_count = 0
+        self.clear_history()  # Reset smoothing for new video
+
+        try:
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                if frame_count % skip_frames == 0:
+                    # Analyze with smoothing enabled
+                    analysis = self.analyze_image(frame, smooth=True,
+                                                   reject_low_confidence=reject_low_confidence)
+                    results.append({
+                        'frame': frame_count,
+                        'timestamp': frame_count / fps,
+                        'faces': analysis
+                    })
+
+                    # Write annotated frame if saving
+                    if out:
+                        annotated = self.draw_emotions(frame, analysis)
+                        out.write(annotated)
+
+                    if show_progress and frame_count % (skip_frames * 30) == 0:
+                        progress = (frame_count / total_frames) * 100
+                        print(f"Processing: {progress:.1f}% ({frame_count}/{total_frames} frames)")
+
+                frame_count += 1
+
+        finally:
+            cap.release()
+            if out:
+                out.release()
+
+        if show_progress:
+            print(f"Completed: {len(results)} frames analyzed")
+
+        return results
 
     def _process_result(self, emotions: Dict, region: Dict, face_number: int,
                         agreement: float = 100.0, head_pose: str = "facing camera",
