@@ -66,6 +66,19 @@ The per-emotion weights were determined through iterative empirical testing:
 
 **Limitations**: This was not a systematic grid search or cross-validated optimization. Weights are educated estimates based on qualitative observation rather than quantitative metrics on a held-out test set. Further optimization could improve accuracy.
 
+**Detection & Refinement Thresholds:**
+
+| Threshold | Value | Purpose |
+|-----------|-------|---------|
+| `mouth_open` | 0.12 | Surprise indicator (open mouth) |
+| `mouth_wide_open` | 0.18 | Very open mouth detection |
+| `mouth_closed` | 0.05 | Fear indicator (closed mouth) |
+| `corners_upturned` | -0.03 | Smile detection |
+| `corners_downturned` | 0.05 | Frown/sad detection |
+| `fear_surprise_diff` | 35 | Score gap to trigger Fear→Surprise refinement |
+| `sad_angry_diff` | 25 | Score gap to trigger Sad→Angry refinement |
+| `ambiguous_gap` | 12 | Flag result as ambiguous if top two emotions within this gap |
+
 ### Phase 4: Face Detection Migration (MTCNN to dlib)
 
 Originally used MTCNN (facenet-pytorch) for face detection, but migrated to dlib:
@@ -99,13 +112,68 @@ Identified and addressed specific confusion patterns through threshold tuning:
 
 **Final Accuracy: ~83%**
 
-### Phase 6: GUI Enhancement
+#### Geometric Analysis Methods
 
-Implemented modern visual effects in the CustomTkinter GUI:
+Three landmark-based analysis functions power the refinement system:
 
-1. **Ghost Effect**: Low-confidence predictions appear translucent
-2. **Glassmorphism Labels**: Frosted glass appearance with blur effect
-3. **Bracket Corners**: Sci-fi/tech aesthetic for face detection boxes
+**Mouth Opening Analysis** (`_analyze_mouth_opening`)
+- Landmarks used: 48, 54 (mouth corners), 62, 66 (inner lip centers)
+- Calculation: Vertical lip gap / horizontal mouth width
+- Output range: 0.0 (closed) to 0.5+ (wide open)
+- Purpose: Distinguish Surprise (open) from Fear (closed)
+
+**Mouth Corner Analysis** (`_analyze_mouth_corners`)
+- Landmarks used: 48, 54 (corners), 51, 57 (lip centers)
+- Calculation: Corner Y-position vs lip center Y-position
+- Output: `upturned` (smile), `downturned` (frown), `neutral`
+- Purpose: Distinguish Sad (downturned) from Angry (neutral/tense)
+
+**Head Pose Estimation** (`_estimate_head_pose`)
+- Landmarks used: 30 (nose tip), 36-47 (eye regions)
+- Calculation: Nose tip offset from eye center, normalized by eye distance
+- Output: `facing camera`, `turned left`, `turned right`
+- Purpose: Flag unreliable predictions when face is not frontal
+
+### Phase 6: GUI & CLI Implementation
+
+#### GUI Application (`gui_app.py`)
+
+Built with CustomTkinter for a modern cross-platform interface:
+
+**Core Features:**
+- **Folder Analysis**: Batch process entire directories of images
+- **Webcam Mode**: Real-time emotion detection from camera feed
+- **Image Preview**: Display analyzed images with emotion overlays
+- **Detailed Results Panel**: Per-face breakdown with all emotion scores
+
+**Visual Effects:**
+- **Ghost Effect**: Low-confidence predictions (< 40%) appear translucent
+- **Glassmorphism Labels**: Frosted glass appearance with blur effect
+- **Bracket Corners**: Sci-fi/tech aesthetic for face detection boxes
+- **Color-Coded Emotions**: Each emotion has a distinct color for quick identification
+
+#### Command Line Interface (`main.py`)
+
+For scripting and batch processing:
+
+```bash
+# Analyze a single image
+python main.py -i photo.jpg
+
+# Analyze folder and save annotated images
+python main.py -i ./photos -o ./results -s
+
+# Quiet mode (no console output)
+python main.py -i photo.jpg -q
+```
+
+**Options:**
+| Flag | Description |
+|------|-------------|
+| `-i, --input` | Input image or directory path |
+| `-o, --output` | Output directory for annotated images |
+| `-s, --save` | Save annotated images with emotion labels |
+| `-q, --quiet` | Suppress console output |
 
 ---
 
@@ -267,6 +335,36 @@ Input Image
             │
             ▼
       Final Prediction
+```
+
+### Refinement Decision Logic
+
+The `_refine_emotions()` method applies these corrections in sequence:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ IF top_emotion == FEAR and surprise_score > 8:                  │
+│   → Check mouth_ratio > 0.12 (open mouth)?                      │
+│   → YES: Boost SURPRISE, reduce FEAR                            │
+│   → Also bias toward SURPRISE if scores are close               │
+├─────────────────────────────────────────────────────────────────┤
+│ IF top_emotion == SURPRISE and fear_score > 35:                 │
+│   → Check mouth_ratio < 0.05 (closed) AND fear > 45?            │
+│   → YES: Small boost to FEAR (conservative - fear is rare)      │
+├─────────────────────────────────────────────────────────────────┤
+│ IF top_emotion == ANGRY and disgust_score > 15:                 │
+│   → Check mouth_ratio < 0.12 (compressed mouth)?                │
+│   → YES: Boost DISGUST, reduce ANGRY                            │
+├─────────────────────────────────────────────────────────────────┤
+│ IF top_emotion == SAD and angry_score > 12:                     │
+│   → Check 1: Low confidence (< 60%) → Boost ANGRY               │
+│   → Check 2: Mouth NOT downturned → Boost ANGRY                 │
+│   → Check 3: Disgust also present → Boost ANGRY                 │
+├─────────────────────────────────────────────────────────────────┤
+│ IF top_emotion == ANGRY and sad_score > 25:                     │
+│   → Check mouth_corners == downturned AND scores close?         │
+│   → YES: Boost SAD, reduce ANGRY                                │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
