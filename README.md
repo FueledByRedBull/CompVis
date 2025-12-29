@@ -43,7 +43,9 @@ python -m venv venv
 venv\Scripts\activate  # Windows
 # source venv/bin/activate  # Linux/Mac
 
-# Install dependencies (requires CMake + C++ compiler - see Installation below)
+# Install dependencies
+# Note: requirements.txt uses dlib-bin (pre-built, Windows-optimized)
+# Linux/Mac users may need: pip install dlib (requires CMake + C++ compiler)
 pip install -r requirements.txt
 
 # Download shape predictor
@@ -413,8 +415,10 @@ numpy>=1.24.0
 Pillow>=10.0.0
 hsemotion-onnx>=0.3
 customtkinter>=5.2.0
-dlib>=19.24.0
+dlib-bin>=19.24.0  # Windows pre-built; Linux/Mac: pip install dlib
 ```
+
+> **Platform Note:** The `requirements.txt` uses `dlib-bin` which provides pre-built wheels for Windows. Linux/Mac users should replace with `dlib` (requires CMake and C++ compiler).
 
 ---
 

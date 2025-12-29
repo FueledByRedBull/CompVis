@@ -755,7 +755,7 @@ class FacialExpressionGUI:
         self.current_image = frame
 
         try:
-            analyses = self.analyzer.analyze_image(frame)
+            analyses = self.analyzer.analyze_image(frame, smooth=True)
             self.current_analyses = analyses
             self.display_image(frame, analyses)
             self.display_results(analyses)

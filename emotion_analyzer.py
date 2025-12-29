@@ -135,19 +135,6 @@ class EmotionAnalyzer:
 
         return smoothed
 
-    def _get_scale_factor(self, landmarks: np.ndarray) -> float:
-        """Get scale factor based on face size (eye distance) for adaptive thresholds."""
-        if landmarks is None or len(landmarks) < 68:
-            return 1.0
-
-        left_eye = landmarks[36:42].mean(axis=0)
-        right_eye = landmarks[42:48].mean(axis=0)
-        eye_dist = np.linalg.norm(right_eye - left_eye)
-
-        # Reference: 60px eye distance = scale 1.0
-        # Clamp between 0.5 and 2.0 to avoid extreme values
-        return max(0.5, min(2.0, eye_dist / 60))
-
     def clear_history(self):
         """Clear emotion history (call when switching images/videos)."""
         self.emotion_history.clear()
