@@ -1,0 +1,62 @@
+ensemble_weights:
+  anger:
+    enet_b2: 0.82699131362896
+    vgaf: 0.06382834354060558
+    afew: 0.10918034283043442
+  contempt:
+    enet_b2: 0.09010488523654436
+    vgaf: 0.8047445844218272
+    afew: 0.10515053034162854
+  disgust:
+    enet_b2: 0.676183386903517
+    vgaf: 0.16512009037293618
+    afew: 0.1586965227235469
+  fear:
+    enet_b2: 0.0585142798328475
+    vgaf: 0.7280526724937884
+    afew: 0.21343304767336405
+  happy:
+    enet_b2: 0.378104218815276
+    vgaf: 0.1487181719940116
+    afew: 0.47317760919071244
+  neutral:
+    enet_b2: 0.059324072568909085
+    vgaf: 0.30689032755095214
+    afew: 0.6337855998801388
+  sad:
+    enet_b2: 0.3552866876389656
+    vgaf: 0.5156774551182782
+    afew: 0.12903585724275607
+  surprise:
+    enet_b2: 0.34116498088110764
+    vgaf: 0.401870185386026
+    afew: 0.2569648337328663
+thresholds:
+  head_pose_left: -0.11028437201115458
+  head_pose_right: 0.2529035610251735
+  mouth_open: 0.18924216112758338
+  mouth_wide_open: 0.26463620904478097
+  mouth_closed: 0.09542062917998528
+  corners_upturned: -0.039213738044400905
+  corners_downturned: 0.07577722089697043
+  fear_surprise_diff: 28.46997870740255
+  fear_surprise_close: 22.969066885689053
+  sad_angry_diff: 39.043438806980284
+  sad_angry_intensity: 11.651416259504643
+  angry_sad_diff: 12.547136182574226
+  ambiguous_gap: 5.537271573035927
+  happy_lowconf_mult: 1.2777477911769584
+  happy_lowconf_cap: 85.94516731411166
+  fear2surprise_boost_mult: 0.522077379691482
+  surprise2fear_boost_mult: 0.31495319970520397
+  disgust2angry_boost_mult: 0.5444686962134851
+  sad2angry_mouth_boost_mult: 0.3565052464941408
+metadata:
+  tuned_on: AffectNet (8 emotions with contempt)
+  baseline_accuracy: 0.63875
+  optimized_accuracy: 0.67625
+  improvement: 0.03749999999999998
+  n_trials: 1000
+  best_trial: 143
+  n_parameters: 43
+  validation_samples: 800

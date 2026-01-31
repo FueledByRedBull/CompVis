@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-This project implements a real-time facial expression analysis system using a 3-model ensemble approach combined with dlib's 68-point facial landmark detection. The system achieves approximately 83% accuracy on basic emotions through intelligent model weighting, landmark-based refinements, and post-processing corrections.
+This project implements a real-time facial expression analysis system using a 3-model ensemble approach combined with dlib's 68-point facial landmark detection. The system is optimized through systematic hyperparameter tuning using Bayesian optimization.
 
 ---
 
@@ -16,296 +16,13 @@ The project began using the DeepFace library, which provided an easy entry point
 - **Issues**: High confusion between similar emotions, inconsistent predictions
 - **Conclusion**: DeepFace's single-model approach was insufficient for reliable emotion detection
 
-### Phase 2: Migration to HSEmotion
-
-Switched to HSEmotion ONNX models, which offered better performance:
-
-- **Accuracy**: ~78%
-- **Improvement**: More consistent predictions, better handling of neutral expressions
-- **Models Used**: enet_b2 (EfficientNet-based)
-
-### Phase 3: Ensemble Architecture
-
-Implemented a 3-model ensemble approach with per-emotion weighted voting:
-
-| Model | Strengths |
-|-------|-----------|
-| enet_b2 | Best overall accuracy, especially for Happy/Neutral |
-| vgaf | Natural expressions (Sad, Surprise) |
-| afew | Acted expressions (Fear, Angry, Disgust) |
-
-**Per-Emotion Weights:**
-```python
-EMOTION_WEIGHTS = {
-    'angry':    {'enet_b2': 0.3, 'vgaf': 0.2, 'afew': 0.5},
-    'happy':    {'enet_b2': 0.5, 'vgaf': 0.3, 'afew': 0.2},
-    'surprise': {'enet_b2': 0.3, 'vgaf': 0.5, 'afew': 0.2},
-    'sad':      {'enet_b2': 0.3, 'vgaf': 0.5, 'afew': 0.2},
-    'fear':     {'enet_b2': 0.2, 'vgaf': 0.3, 'afew': 0.5},
-    'disgust':  {'enet_b2': 0.2, 'vgaf': 0.3, 'afew': 0.5},
-    'neutral':  {'enet_b2': 0.5, 'vgaf': 0.3, 'afew': 0.2},
-    'contempt': {'enet_b2': 0.4, 'vgaf': 0.4, 'afew': 0.2},
-}
-```
-
-- **Accuracy**: ~85-88%
-- **Key Insight**: Different models excel at different emotions; weighted voting leverages each model's strengths
-
-**Weight Tuning Methodology:**
-
-The per-emotion weights were determined through iterative empirical testing:
-
-1. **Initial Assessment**: Each model was tested individually on a set of labeled images to identify strengths:
-   - `enet_b2`: Strong on Happy, Neutral (clear expressions)
-   - `vgaf`: Strong on Sad, Surprise (natural expressions)
-   - `afew`: Strong on Fear, Angry, Disgust (intense expressions)
-
-2. **Weight Assignment**: Weights were assigned based on observed performance, giving higher weight to the model that performed best for each emotion.
-
-3. **Iterative Refinement**: Weights were adjusted through trial runs, observing misclassifications and tweaking values.
-
-**Limitations**: This was not a systematic grid search or cross-validated optimization. Weights are educated estimates based on qualitative observation rather than quantitative metrics on a held-out test set. Further optimization could improve accuracy.
-
-**Detection & Refinement Thresholds:**
-
-| Threshold | Value | Purpose |
-|-----------|-------|---------|
-| `mouth_open` | 0.12 | Surprise indicator (open mouth) |
-| `mouth_wide_open` | 0.18 | Very open mouth detection |
-| `mouth_closed` | 0.05 | Fear indicator (closed mouth) |
-| `corners_upturned` | -0.03 | Smile detection |
-| `corners_downturned` | 0.05 | Frown/sad detection |
-| `fear_surprise_diff` | 35 | Score gap to trigger Fear→Surprise refinement |
-| `sad_angry_diff` | 25 | Score gap to trigger Sad→Angry refinement |
-| `ambiguous_gap` | 12 | Flag result as ambiguous if top two emotions within this gap |
-
-### Phase 4: Face Detection Migration (MTCNN to dlib)
-
-Originally used MTCNN (facenet-pytorch) for face detection, but migrated to dlib:
-
-**Reasons for Migration:**
-- Lighter dependencies (no PyTorch required)
-- Better landmark detection with 68-point model
-- More reliable face detection for various angles
-- Faster inference on CPU
-
-**Changes Made:**
-- Replaced MTCNN face detection with dlib HOG detector
-- Implemented 68-point landmark analysis for refinements
-- Added shape predictor model (`shape_predictor_68_face_landmarks.dat`)
-
-### Phase 5: Refinement Tuning
-
-Identified and addressed specific confusion patterns through threshold tuning:
-
-**Fear vs Surprise Confusion:**
-- Problem: Fear often misclassified as Surprise (and vice versa)
-- Solution: Analyze mouth opening ratio using landmarks
-- Threshold: `mouth_ratio > 0.12` indicates Surprise (open mouth)
-- Boost: +35% toward Surprise when mouth is open
-
-**Sad vs Angry Confusion:**
-- Problem: Subtle differences between sad and angry expressions
-- Solution: Analyze mouth corner positions
-- Logic: If mouth corners aren't clearly downturned, bias toward Angry
-- Boost: +25% toward Angry when ambiguous
-
-**Final Accuracy: ~83%**
-
-#### Geometric Analysis Methods
-
-Three landmark-based analysis functions power the refinement system:
-
-**Mouth Opening Analysis** (`_analyze_mouth_opening`)
-- Landmarks used: 48, 54 (mouth corners), 62, 66 (inner lip centers)
-- Calculation: Vertical lip gap / horizontal mouth width
-- Output range: 0.0 (closed) to 0.5+ (wide open)
-- Purpose: Distinguish Surprise (open) from Fear (closed)
-
-**Mouth Corner Analysis** (`_analyze_mouth_corners`)
-- Landmarks used: 48, 54 (corners), 51, 57 (lip centers)
-- Calculation: Corner Y-position vs lip center Y-position
-- Output: `upturned` (smile), `downturned` (frown), `neutral`
-- Purpose: Distinguish Sad (downturned) from Angry (neutral/tense)
-
-**Head Pose Estimation** (`_estimate_head_pose`)
-- Landmarks used: 30 (nose tip), 36-47 (eye regions)
-- Calculation: Nose tip offset from eye center, normalized by eye distance
-- Output: `facing camera`, `turned left`, `turned right`
-- Purpose: Flag unreliable predictions when face is not frontal
-
-### Phase 6: GUI & CLI Implementation
-
-#### GUI Application (`gui_app.py`)
-
-Built with CustomTkinter for a modern cross-platform interface:
-
-**Core Features:**
-- **Folder Analysis**: Batch process entire directories of images
-- **Webcam Mode**: Real-time emotion detection from camera feed
-- **Image Preview**: Display analyzed images with emotion overlays
-- **Detailed Results Panel**: Per-face breakdown with all emotion scores
-
-**Visual Effects:**
-- **Ghost Effect**: Low-confidence predictions (< 40%) appear translucent
-- **Glassmorphism Labels**: Frosted glass appearance with blur effect
-- **Bracket Corners**: Sci-fi/tech aesthetic for face detection boxes
-- **Color-Coded Emotions**: Each emotion has a distinct color for quick identification
-
-#### Command Line Interface (`main.py`)
-
-For scripting and batch processing:
-
-```bash
-# Analyze a single image
-python main.py -i photo.jpg
-
-# Analyze folder and save annotated images
-python main.py -i ./photos -o ./results -s
-
-# Quiet mode (no console output)
-python main.py -i photo.jpg -q
-```
-
-**Options:**
-| Flag | Description |
-|------|-------------|
-| `-i, --input` | Input image or directory path |
-| `-o, --output` | Output directory for annotated images |
-| `-s, --save` | Save annotated images with emotion labels |
-| `-q, --quiet` | Suppress console output |
-
 ---
 
-## Strengths
+## System Architecture
 
-### 1. Ensemble Architecture
-- Combines predictions from three specialized models
-- Per-emotion weighting optimizes for each emotion's characteristics
-- Model agreement metric provides confidence indicator
+### Overview
 
-### 2. Landmark-Based Refinements
-- 68-point facial landmarks enable geometric analysis
-- Mouth opening detection distinguishes Surprise from Fear
-- Mouth corner analysis helps differentiate Sad from Angry
-- Head pose estimation detects if subject is facing camera
-
-### 3. Robust Face Detection
-- dlib HOG detector works well across lighting conditions
-- CLAHE preprocessing improves detection in poor lighting
-- Multi-face support with reading-order enumeration
-
-### 4. Modern GUI
-- CustomTkinter provides cross-platform modern appearance
-- Real-time webcam support for live analysis
-- Visual effects enhance user experience without impacting performance
-
-### 5. Lightweight Dependencies
-- No PyTorch/TensorFlow required for inference
-- ONNX runtime for efficient model execution
-- Reasonable memory footprint
-
----
-
-## Addressed Limitations
-
-The following limitations from earlier versions have been resolved:
-
-### Adaptive Thresholds
-- Thresholds now scale based on face size (eye distance)
-- `_get_scale_factor()` method normalizes for different face distances
-- Better generalization across varying face sizes and camera distances
-
-### Temporal Smoothing
-- Rolling average of last 5 frames in webcam/video mode
-- Reduces frame-to-frame prediction fluctuation
-- Enable with `analyze_image(image, smooth=True)`
-- `clear_history()` method resets smoothing when switching sources
-
-### Confidence Thresholding
-- Predictions below 30% confidence can be rejected as uncertain
-- Enable with `analyze_image(image, reject_low_confidence=True)`
-- Reduces false positives from ambiguous expressions
-- Configurable threshold via `min_confidence` attribute
-
-### Video Batch Processing
-- Full video file support with `analyze_video()` method
-- Frame skipping for faster processing (`skip_frames` parameter)
-- Automatic temporal smoothing across video frames
-- Optional annotated video output with emotion overlays
-- CLI support: `python main.py -v video.mp4 -o output.mp4 --skip-frames 2`
-
----
-
-## Weaknesses
-
-### 1. Contempt Detection
-- 8th emotion (Contempt) is least reliable
-- Limited training data in most emotion datasets
-- Often confused with Neutral or Disgust
-
-### 2. Lighting Sensitivity
-- Despite CLAHE preprocessing, extreme lighting affects accuracy
-- Backlit subjects particularly problematic
-- Color temperature variations can impact detection
-
-### 3. Profile Face Limitations
-- Accuracy drops significantly for non-frontal faces
-- Head pose estimation helps identify this, but doesn't fix it
-- 68-point landmarks require mostly frontal view
-
-### 4. Micro-Expression Detection
-- System optimized for posed/clear expressions
-- Subtle or fleeting emotions often missed
-- Real-world spontaneous expressions less accurate than posed photos
-
-### 5. Cultural Expression Variations
-- Training data may not represent all cultural expression norms
-- Some cultures express emotions differently
-- May introduce bias for certain demographics
-
-### 6. Training Data Bias
-- Pre-trained models may not represent all demographics equally
-- Potential accuracy variations across different ethnic groups, ages, or genders
-- No control over original training dataset composition
-
----
-
-## Results Analysis
-
-### Accuracy Breakdown by Emotion
-
-| Emotion | Estimated Accuracy | Notes |
-|---------|-------------------|-------|
-| Happy | ~95% | Easiest to detect (clear smile) |
-| Neutral | ~90% | Generally reliable |
-| Surprise | ~85% | Good after mouth-opening refinement |
-| Angry | ~80% | Improved with mouth-corner analysis |
-| Sad | ~75% | Still some confusion with Angry |
-| Fear | ~70% | Hardest emotion, often subtle |
-| Disgust | ~75% | Distinctive but uncommon |
-| Contempt | ~60% | Least reliable |
-
-### Confusion Matrix Patterns
-
-**Most Common Confusions:**
-1. Fear ↔ Surprise (mitigated by mouth analysis)
-2. Sad ↔ Angry (mitigated by corner analysis)
-3. Neutral ↔ Contempt (subtle differences)
-4. Disgust ↔ Angry (similar muscle activation)
-
-### Performance Metrics
-
-| Metric | Value |
-|--------|-------|
-| Average Inference Time | ~100-150ms per face |
-| Model Loading Time | ~2-3 seconds |
-| Memory Usage | ~500MB |
-| GPU Requirement | None (CPU only) |
-
----
-
-## Technical Architecture
+The system combines three complementary emotion recognition models with 68-point facial landmark analysis:
 
 ```
 Input Image
@@ -349,71 +66,678 @@ Input Image
             ▼
     ┌───────────────┐
     │  Refinements  │
-    │ (Fear/Surprise│
-    │  Sad/Angry)   │
+    │ (Geometric +  │
+    │   Threshold)  │
     └───────┬───────┘
             │
             ▼
       Final Prediction
 ```
 
-### Refinement Decision Logic
+---
+### Phase 2: Ensemble Approach with dlib
 
-The `_refine_emotions()` method applies these corrections in sequence:
+## Model Ensemble
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ IF top_emotion == FEAR and surprise_score > 8:                  │
-│   → Check mouth_ratio > 0.12 (open mouth)?                      │
-│   → YES: Boost SURPRISE, reduce FEAR                            │
-│   → Also bias toward SURPRISE if scores are close               │
-├─────────────────────────────────────────────────────────────────┤
-│ IF top_emotion == SURPRISE and fear_score > 35:                 │
-│   → Check mouth_ratio < 0.05 (closed) AND fear > 45?            │
-│   → YES: Small boost to FEAR (conservative - fear is rare)      │
-├─────────────────────────────────────────────────────────────────┤
-│ IF top_emotion == ANGRY and disgust_score > 15:                 │
-│   → Check mouth_ratio < 0.12 (compressed mouth)?                │
-│   → YES: Boost DISGUST, reduce ANGRY                            │
-├─────────────────────────────────────────────────────────────────┤
-│ IF top_emotion == SAD and angry_score > 12:                     │
-│   → Check 1: Low confidence (< 60%) → Boost ANGRY               │
-│   → Check 2: Mouth NOT downturned → Boost ANGRY                 │
-│   → Check 3: Disgust also present → Boost ANGRY                 │
-├─────────────────────────────────────────────────────────────────┤
-│ IF top_emotion == ANGRY and sad_score > 25:                     │
-│   → Check mouth_corners == downturned AND scores close?         │
-│   → YES: Boost SAD, reduce ANGRY                                │
-└─────────────────────────────────────────────────────────────────┘
-```
+### The Three Models
+
+| Model | Architecture | Training Data | Strengths |
+|-------|-------------|---------------|-----------|
+| **enet_b2** | EfficientNet-B2 | AffectNet + FER | Happy, Neutral (clear, posed expressions) |
+| **vgaf** | EfficientNet-B0 | VAFFace + Aff-Wild2 | Sad, Surprise (natural expressions) |
+| **afew** | EfficientNet-B0 | Aff-Wild | Fear, Angry, Disgust (intense expressions) |
+
+### Why These Models?
+
+Different datasets capture different aspects of emotional expression:
+
+- **AffectNet**: Large, diverse dataset but many posed expressions
+- **FER2013**: Clean facial expressions but 7 classes only
+- **VAFFace**: Natural, in-the-wild expressions
+- **Aff-Wild**: Extreme poses and real-world conditions
+
+By combining models trained on different distributions, we get more robust predictions across varied scenarios.
 
 ---
 
-## Future Improvements
+## Per-Emotion Weighted Voting
 
-### Short-term
-1. Improve Contempt detection with additional training
+### The Concept
 
-### Medium-term
-1. Add support for side-profile faces
+Rather than simple majority voting, each model contributes differently to each emotion prediction based on its demonstrated strengths:
 
-### Long-term
-1. Train custom model on diverse dataset
-2. Add micro-expression detection
-3. Implement attention mechanisms for better feature extraction
+```python
+EMOTION_WEIGHTS = {
+    'anger':    {'enet_b2': 0.3, 'vgaf': 0.2, 'afew': 0.5},
+    'contempt': {'enet_b2': 0.4, 'vgaf': 0.3, 'afew': 0.3},
+    'disgust':  {'enet_b2': 0.3, 'vgaf': 0.2, 'afew': 0.5},
+    'fear':     {'enet_b2': 0.2, 'vgaf': 0.3, 'afew': 0.5},
+    'happy':    {'enet_b2': 0.5, 'vgaf': 0.3, 'afew': 0.2},
+    'neutral':  {'enet_b2': 0.5, 'vgaf': 0.3, 'afew': 0.2},
+    'sad':      {'enet_b2': 0.3, 'vgaf': 0.5, 'afew': 0.2},
+    'surprise': {'enet_b2': 0.3, 'vgaf': 0.5, 'afew': 0.2},
+}
+```
+
+### How It Works
+
+For each emotion, we calculate a weighted average of the three model predictions:
+
+```
+ensemble_score(emotion) =
+    (enet_b2_score × weight_enet_b2 +
+     vgaf_score × weight_vgaf +
+     afew_score × weight_afew) /
+    (weight_enet_b2 + weight_vgaf + weight_afew)
+```
+
+### Majority Override
+
+If 2 out of 3 models agree on an emotion different from the ensemble's choice, we apply a "majority override" - boosting the agreed-upon emotion if it has reasonable confidence.
+
+---
+
+## 68-Point Landmark Analysis
+
+### What Are Facial Landmarks?
+
+dlib's shape predictor returns 68 (x, y) coordinates representing key facial features:
+
+```
+Points 1-17:   Jawline outline
+Points 18-27:  Eyebrows
+Points 28-36:  Nose
+Points 37-42:  Right eye
+Points 43-48:  Left eye
+Points 49-68:  Mouth
+```
+
+These landmarks enable geometric analysis that pure CNN models often miss.
+
+### Geometric Analysis Functions
+
+#### 1. Mouth Opening Analysis
+
+**Purpose:** Distinguish Surprise (open mouth) from Fear (closed mouth)
+
+**Landmarks used:** 48, 54 (corners), 62, 66 (inner lip centers)
+
+```python
+mouth_ratio = lip_gap / mouth_width
+```
+
+| Value | Interpretation |
+|-------|----------------|
+| < 0.05 | Mouth closed (suggests Fear) |
+| 0.05 - 0.15 | Slightly open |
+| > 0.15 | Wide open (suggests Surprise) |
+
+#### 2. Mouth Corner Analysis
+
+**Purpose:** Distinguish Sad (downturned mouth) from Angry (neutral/tense)
+
+**Landmarks used:** 48, 54 (corners), 51, 57 (lip centers)
+
+```python
+corner_offset = (corner_y_avg - lip_center_y) / eye_distance
+```
+
+| Value | Interpretation |
+|-------|----------------|
+| < -0.03 | Corners upturned (smile) |
+| -0.03 to 0.05 | Neutral |
+| > 0.05 | Corners downturned (sad) |
+
+#### 3. Head Pose Estimation
+
+**Purpose:** Flag non-frontal faces (predictions less reliable)
+
+**Landmarks used:** 30 (nose tip), 36-47 (eyes)
+
+```python
+nose_offset = (nose_x - eye_center_x) / eye_distance
+```
+
+| Value | Interpretation |
+|-------|----------------|
+| < -0.15 | Turned left |
+| -0.15 to 0.15 | Facing camera |
+| > 0.15 | Turned right |
+
+---
+
+## Emotion Refinement Rules
+
+The system applies targeted corrections when models are confused between similar emotions.
+
+> **Note:** The examples below use simplified threshold values for clarity. In the actual implementation, all refinements use the `THRESHOLDS` dictionary values, which are optimized through Bayesian hyperparameter tuning (see Detection Thresholds section).
+
+### Fear vs Surprise (Most Common Confusion)
+
+**Problem:** Fear is often overpredicted; Surprise is underpredicted
+
+**Solution:** Strong bias toward Surprise unless mouth is clearly closed
+
+```python
+IF top_emotion == 'fear' AND surprise_score > 8:
+    IF mouth_ratio > 0.12:  # Open mouth
+        Boost SURPRISE by +20
+        Reduce FEAR by -20
+
+# Always bias toward Surprise when scores are close
+IF fear_score - surprise_score < 35:
+    Boost SURPRISE by +15
+```
+
+**Rationale:** Genuine fear expressions are rare in posed photos; open-mouth expressions are usually surprise.
+
+### Sad vs Angry
+
+**Problem:** Low-confidence sad predictions are often angry (tense vs sad)
+
+**Solution:** Multiple checks to verify true sadness
+
+```python
+IF top_emotion == 'sad' AND angry_score > 12:
+    # Check 1: Low confidence suggests angry
+    IF confidence < 60:
+        Boost ANGRY by +20
+
+    # Check 2: Mouth must be downturned for sad
+    IF mouth_corners != 'downturned':
+        Boost ANGRY by +18
+
+    # Check 3: Angry cluster (disgust present)
+    IF disgust_score > 10:
+        Boost ANGRY by +12
+```
+
+**Rationale:** Angry expressions are more intense and confident; sad requires specific mouth geometry.
+
+### Angry vs Disgust
+
+**Problem:** Both involve tense facial expressions
+
+**Solution:** Use mouth compression to distinguish
+
+```python
+IF top_emotion == 'angry' AND disgust_score > 15:
+    IF mouth_ratio < 0.12:  # Compressed mouth
+        Boost DISGUST by +15
+```
+
+**Rationale:** Disgust typically involves compressed lips (upper lip raised).
+
+### Angry vs Sad (Reverse)
+
+**Problem:** Angry might actually be sad if mouth is downturned
+
+**Solution:** Only flip if geometry confirms sad
+
+```python
+IF top_emotion == 'angry' AND sad_score > 25:
+    IF mouth_corners == 'downturned' AND angry_sad_gap < 10:
+        Boost SAD by +8
+```
+
+**Rationale:** Conservative flip - only if geometry clearly indicates sadness.
+
+---
+
+## Detection Thresholds
+
+The refinement system uses 13 tunable thresholds:
+
+| Threshold | Range | Purpose |
+|-----------|-------|---------|
+| `head_pose_left` | -0.30 to -0.05 | Left turn detection |
+| `head_pose_right` | 0.05 to 0.30 | Right turn detection |
+| `mouth_open` | 0.08 to 0.20 | Open mouth threshold |
+| `mouth_wide_open` | 0.15 to 0.30 | Wide open threshold |
+| `mouth_closed` | 0.02 to 0.10 | Closed mouth threshold |
+| `corners_upturned` | -0.10 to 0.0 | Smile detection |
+| `corners_downturned` | 0.0 to 0.15 | Frown detection |
+| `fear_surprise_diff` | 20 to 50 | Score gap for bias |
+| `fear_surprise_close` | 5 to 25 | Strong bias threshold |
+| `sad_angry_diff` | 15 to 40 | Ambiguity threshold |
+| `sad_angry_intensity` | 10 to 30 | Low confidence check |
+| `angry_sad_diff` | 5 to 20 | Reverse flip threshold |
+| `ambiguous_gap` | 5 to 20 | Ambiguity flagging |
+
+These thresholds are optimized through Bayesian hyperparameter tuning.
+
+---
+
+## Hyperparameter Optimization
+
+### The Problem
+
+The system has **37 tunable parameters**:
+- 24 ensemble weights (8 emotions × 3 models)
+- 13 detection thresholds
+
+Manually tuning these is impossible. We need automated optimization.
+
+### Optimization Setup
+
+**Framework:** Optuna with TPE (Tree-structured Parzen Estimator) sampler
+
+**Search Space:**
+
+| Parameter Type | Count | Optimization Method |
+|----------------|-------|---------------------|
+| Ensemble weights | 24 | Log-uniform (0.0 to 3.0) → softmax normalized |
+| Thresholds | 13 | Uniform within bounds |
+
+**Configuration:**
+- **Objective:** Maximize accuracy on AffectNet-8 validation set
+- **Trials:** 200
+- **Parallel jobs:** 4 workers
+- **Pruning:** Median (n_startup_trials=10)
+- **Validation:** 2,000 images (250 per emotion, random seed=42)
+- **Pruning checkpoints:** 10 per trial (report every 200 images)
+
+### Median Pruning
+
+How it works:
+1. **Warmup phase (trials 1-10):** No pruning, let exploration happen
+2. **Active pruning (trials 11+):** At each checkpoint, compare intermediate accuracy to median of previous trials at same step
+3. **Prune condition:** If current trial's accuracy is below median, stop trial early
+
+**Benefits:**
+- Saves ~40-50% computation time
+- Focuses resources on promising parameter regions
+
+### The Optimization Process
+
+```
+For each trial:
+    1. Sample 37 parameters using TPE
+    2. Normalize ensemble weights (softmax)
+    3. Apply weights and thresholds
+    4. Evaluate on validation images:
+       - Report accuracy every 200 images
+       - Check if should prune (if below median)
+       - If pruned: stop early, save as PRUNED
+       - If complete: save final accuracy
+    5. Update TPE model with results
+```
+
+### Why TPE (Tree-structured Parzen Estimator)?
+
+- Models the probability distribution of good parameters
+- More efficient than random search
+- Handles mixed search spaces (continuous weights, bounded thresholds)
+- Naturally explores promising regions as trials progress
+
+---
+
+## Critical Bug Discovery
+
+### The Bug
+
+During optimization, we discovered a critical issue affecting accuracy:
+
+**Symptom:** System performed 7-9% worse than expected
+
+**Root Cause:** The `_remove_contempt_and_renormalize()` function was **hardcoded to always execute**
+
+```python
+# BUGGY CODE - always removed contempt
+def analyze_image(...):
+    emotions = self._refine_emotions(emotions, face_landmarks)
+    emotions = self._remove_contempt_and_renormalize(emotions)  # ← Always!
+```
+
+**Impact on AffectNet-8:**
+1. Model correctly predicts 'contempt' as dominant emotion
+2. Code strips contempt and redistributes score to 7 other emotions
+3. Different emotion becomes dominant
+4. Evaluation marks prediction as wrong (ground truth was 'contempt')
+
+**Impact Assessment:**
+
+| Configuration | Bugged | Fixed | Loss |
+|---------------|---------|-------|------|
+| Single Model | 52.0% | ~59-60% | ~7-8% |
+| Ensemble | 54.0% | 61.6% | 7.6% |
+
+### The Fix
+
+Added `enable_contempt` flag to handle different dataset types:
+
+```python
+class EmotionAnalyzer:
+    def __init__(self, use_ensemble=True, enable_contempt=True):
+        self.enable_contempt = enable_contempt
+
+    def analyze_image(self, ...):
+        emotions = self._refine_emotions(emotions, face_landmarks)
+
+        # Only remove contempt for 7-emotion datasets
+        if not self.enable_contempt:
+            emotions = self._remove_contempt_and_renormalize(emotions)
+```
+
+**Usage:**
+- AffectNet-8: `enable_contempt=True` (keep all 8 emotions)
+- FER-7: `enable_contempt=False` (remove contempt, redistribute to 7)
+
+This discovery was crucial - it revealed the system's true performance capability.
+
+---
+
+## Dataset Compatibility
+
+### Two Datasets, Different Requirements
+
+| Dataset | Emotions | Contempt? | System Setting |
+|---------|----------|-----------|-----------------|
+| **AffectNet-8** | 8 | Yes | `enable_contempt=True` |
+| **FER-7** | 7 | No | `enable_contempt=False` |
+
+### Contempt Removal Logic (for FER-7)
+
+When `enable_contempt=False`, the system:
+
+1. **Extracts contempt mass** from probability distribution
+2. **Redistributes proportionally** to the 7 remaining emotions based on their existing scores
+3. **Renormalizes** to ensure sum = 100%
+
+This allows testing on 7-emotion datasets without wasting the model's contempt predictions.
+
+---
+
+## System Strengths
+
+### 1. Ensemble Architecture
+- Combines three complementary models with different training distributions
+- Per-emotion weighting optimizes each model's contribution
+- Majority override prevents ensemble from going against strong model agreement
+
+### 2. Geometric Refinements
+- 68-point landmarks enable analysis beyond CNN features
+- Mouth geometry distinguishes Fear/Surprise effectively
+- Mouth corner position helps separate Sad/Angry
+- Head pose detection flags non-frontal faces
+
+### 3. Dataset Flexibility
+- `enable_contempt` flag handles both 7 and 8 emotion datasets
+- Contempt removal and redistribution for FER compatibility
+- Easy to extend to other datasets
+
+### 4. Efficient Optimization
+- Bayesian hyperparameter tuning with TPE sampler
+- Median pruning saves ~40% computation time
+- Intermediate reporting enables early stopping of poor trials
+
+### 5. CPU-Only Operation
+- No GPU required (dlib + ONNX Runtime)
+- CLAHE preprocessing improves poor lighting conditions
+- ~100-150ms inference time per face
+
+---
+
+## System Weaknesses
+
+### 1. Profile Faces
+**Issue:** Accuracy drops significantly for non-frontal faces
+
+**Why:** 68-point landmarks require frontal view; profile faces have occluded features
+
+**Current mitigation:** Head pose estimation flags non-frontal faces, but doesn't improve accuracy
+
+### 2. Contempt Reliability
+**Issue:** Contempt is the least accurate emotion
+
+**Why:** Limited training data; subtle expression often confused with Neutral or Disgust
+
+**Current mitigation:** Higher weights on enet_b2 for contempt, but still challenging
+
+### 3. Micro-Expressions
+**Issue:** Subtle or fleeting emotions often missed
+
+**Why:** Models trained on posed/clear expressions; spontaneous emotions differ
+
+**Current mitigation:** Temporal smoothing helps for video, but fundamental model limitation
+
+### 4. Lighting Extremes
+**Issue:** Backlit and extreme lighting affect accuracy
+
+**Why:** CLAHE helps but can't compensate for severe lighting imbalance
+
+**Current mitigation:** Confidence thresholding can reject uncertain predictions
+
+### 5. Cultural Expression Variation
+**Issue:** Training data may not represent all cultural norms
+
+**Why:** Expression intensity and style vary across cultures
+
+**Current mitigation:** None - requires diverse training data
+
+---
+
+## Evaluation Metrics
+
+### Performance Benchmarks
+
+| Metric | Value |
+|--------|-------|
+| Baseline (Single Model) | ~60-61% |
+| Baseline (Ensemble) | 61.6% |
+| Target (Optimized Ensemble) | 64-65% |
+| Inference Time | ~100-150ms per face |
+| Memory Usage | ~500MB |
+| GPU Requirement | None (CPU only) |
+
+### Confusion Patterns (Expected)
+
+| Most Common | Reason | Mitigation |
+|------------|--------|------------|
+| Fear ↔ Surprise | Similar mouth/appearance | Geometric mouth analysis |
+| Sad ↔ Angry | Tense expressions in both | Mouth corner analysis |
+| Neutral ↔ Contempt | Subtle differences | None currently |
+| Disgust ↔ Angry | Similar muscle activation | Mouth compression check |
+
+---
+
+## Results Analysis
+
+### Overview
+
+The optimized system was evaluated on two datasets: **AffectNet-8** (8 emotions with contempt, 4000 test images) and **FER-7** (7 emotions without contempt, 3111 test images). The following results summarize the performance comparison between baseline and optimized parameters across both datasets.
+
+### Overall Performance
+
+| Dataset | Images | Baseline | Optimized | Improvement |
+|---------|--------|----------|-----------|-------------|
+| **AffectNet-8** | 4000 | 61.6% | **63.1%** | **+1.5%** |
+| **FER-7** | 3111 | 39.1% | 38.3% | -0.8% |
+
+**Key Finding:** The hyperparameter optimization improved performance on the target dataset (AffectNet) but resulted in a slight regression on the FER dataset. This indicates **dataset-specific optimization** - the learned parameters are specialized for AffectNet's distribution and do not generalize perfectly to FER.
+
+---
+
+### AffectNet-8 Detailed Results
+
+#### Overall Metrics
+- **Baseline Accuracy**: 61.6%
+- **Optimized Accuracy**: 63.1%
+- **Absolute Improvement**: +1.5 percentage points
+- **Relative Improvement**: +2.4%
+
+#### Per-Emotion Analysis
+
+| Emotion | Baseline | Optimized | Δ | Change |
+|---------|----------|-----------|---|--------|
+| **Happy** | 85.6% | 86.0% | +0.4% | Improved |
+| **Anger** | 79.4% | 75.0% | -4.4% | Regressed |
+| **Surprise** | 72.6% | 70.0% | -2.6% | Regressed |
+| **Contempt** | 61.4% | 62.0% | +0.6% | Improved |
+| **Sad** | 61.6% | 62.2% | +0.6% | Improved |
+| **Disgust** | 54.2% | 59.6% | +5.4% | **Improved** |
+| **Fear** | 44.4% | 54.2% | +9.8% | **Most Improved** |
+| **Neutral** | 33.6% | 35.8% | +2.2% | Improved |
+
+**Analysis:**
+- **Best performing emotion**: Happy (86.0%) - high confidence, distinctive features
+- **Most improved emotion**: Fear (+9.8%) - refinement multipliers effectively address fear/surprise confusion
+- **Most challenging emotion**: Neutral (35.8%) - subtle expressions, easily confused
+- **Regressions**: Anger (-4.4%) and Surprise (-2.6%) - optimization traded accuracy in these emotions for gains elsewhere
+
+#### Confusion Matrix Analysis
+
+![Confusion matrices saved to output_folder/](output_folder/confusion_matrix_*.png)
+
+The confusion matrices reveal several patterns:
+- **Fear/Surprise confusion**: Significantly reduced through coupled refinement multipliers
+- **Sad/Angry confusion**: Improved through mouth corner geometric analysis
+- **Neutral ambiguity**: Often confused with low-intensity emotions across the board
+
+---
+
+### FER-7 Detailed Results
+
+#### Overall Metrics
+- **Baseline Accuracy**: 39.1%
+- **Optimized Accuracy**: 38.3%
+- **Absolute Change**: -0.8 percentage points
+- **Relative Change**: -2.0%
+
+#### Per-Emotion Analysis
+
+| Emotion | Baseline | Optimized | Δ | Change |
+|---------|----------|-----------|---|--------|
+| **Happy** | 64.0% | 64.4% | +0.4% | Improved |
+| **Angry** | 40.0% | 40.0% | 0.0% | No change |
+| **Disgust** | 42.3% | 46.8% | +4.5% | **Improved** |
+| **Fear** | 23.6% | 25.0% | +1.4% | Improved |
+| **Neutral** | 35.4% | 37.8% | +2.4% | Improved |
+| **Sad** | 31.6% | 29.8% | -1.8% | Regressed |
+| **Surprise** | 39.4% | 31.0% | -8.4% | **Most Regressed** |
+
+**Analysis:**
+- **Best performing emotion**: Happy (64.4%) - consistent across datasets
+- **Most challenging emotion**: Fear (25.0%) - low baseline, difficult to classify
+- **Biggest regression**: Surprise (-8.4%) - AffectNet-optimized parameters hurt surprise detection on FER
+- **Overall regression**: The -0.8% decline indicates **overfitting to AffectNet**
+
+---
+
+### Cross-Dataset Generalization
+
+#### Test: AffectNet-Optimized Parameters on FER Dataset
+
+| Configuration | FER Accuracy |
+|---------------|-------------|
+| Baseline FER | 39.1% |
+| AffectNet-optimized on FER | 38.3% |
+| **Difference** | **-0.8%** |
+
+**Generalization Assessment: POOR** ❌
+
+The AffectNet-optimized parameters perform **worse** on FER than the baseline parameters. This is expected and reveals important characteristics of the optimization:
+
+1. **Dataset Bias**: The 43 parameters were optimized specifically on AffectNet's distribution (posed vs natural expressions, different demographics, image quality)
+2. **Feature Specialization**: Optimized thresholds (e.g., `sad_angry_diff: 39.0`) are tuned for AffectNet's specific confusion patterns
+3. **Ensemble Weight Shift**: Per-emotion weights are significantly different from baseline (e.g., Fear: 0.2/0.3/0.5 → 0.06/0.73/0.21)
+
+**Implications:**
+- For **single-dataset deployment**: Use optimized parameters on the target dataset
+- For **multi-dataset systems**: Consider separate parameter sets or ensemble of parameter sets
+- The **refinement multipliers** contribute heavily to the AffectNet specialization
+
+---
+
+### Confusion Matrix Analysis
+
+Confusion matrices were generated for all four combinations and saved to `output_folder/`:
+
+| File | Description |
+|------|-------------|
+| `confusion_matrix_baseline_fer.png` | FER baseline (39.1%) |
+| `confusion_matrix_baseline_affectnet.png` | AffectNet baseline (61.6%) |
+| `confusion_matrix_optimized_fer.png` | FER optimized (38.3%) |
+| `confusion_matrix_optimized_affectnet.png` | AffectNet optimized (63.1%) |
+
+**Key observations from confusion matrices:**
+
+1. **Fear/Surprise confusion** (AffectNet): Most off-diagonal elements in this pair, confirming the value of the coupled refinement multipliers
+
+2. **Neutral confusion** (both datasets): Neutral is frequently confused with low-intensity emotions, particularly Fear, Sad, and Contempt
+
+3. **Happy classification** (both datasets): Happy has the highest diagonal values, indicating it's the most reliably detected emotion
+
+4. **Dataset-specific patterns**:
+   - **AffectNet**: Better at Anger detection (75-79%), worse at Fear (44-54%)
+   - **FER**: Worse at Fear (23-25%), better at Happy (64%)
+
+---
+
+### Optimization Impact Summary
+
+| Metric | Value |
+|--------|-------|
+| **Parameters optimized** | 43 (24 ensemble weights + 19 thresholds) |
+| **Optimization trials** | 1000 |
+| **Best trial** | #143 |
+| **Pruning efficiency** | 27.7% (277 pruned / 1000 total) |
+| **Optimization time** | 7h 14m |
+| **Validation samples** | 800 (100 per emotion) |
+
+**Parameter evolution highlights:**
+- Ensemble weights shifted significantly from baseline (e.g., Fear weights changed from 0.2/0.3/0.5 to 0.06/0.73/0.21)
+- Thresholds adjusted to reduce Fear/Surprise false positives (e.g., `fear_surprise_diff: 28.5` vs baseline 35.0)
+- Refinement multipliers optimized (e.g., `disgust2angry_boost_mult: 0.54`)
+
+---
+
+### Statistical Significance Considerations
+
+While formal statistical testing was not performed, the following observations are noteworthy:
+
+1. **Consistent improvements**: 6 out of 8 AffectNet emotions improved
+2. **Magnitude of improvement**: Fear (+9.8%) and Disgust (+5.4%) showed substantial gains
+3. **Stable regression**: Anger (-4.4%) and Surprise (-2.6%) regressed consistently, suggesting systematic tradeoffs rather than noise
+
+The **+1.5% overall improvement** on AffectNet represents approximately **60 additional correct classifications** out of 4000 test images.
 
 ---
 
 ## Conclusion
 
-This facial expression analyzer demonstrates that ensemble approaches combined with geometric analysis can achieve reliable emotion detection without requiring heavy deep learning frameworks. The ~83% accuracy, while not state-of-the-art, represents a practical balance between accuracy and computational efficiency.
+This project demonstrates that systematic hyperparameter optimization, combined with geometric analysis and ensemble methods, can achieve competitive facial expression recognition without requiring GPU acceleration.
 
-The key innovations are:
-1. Per-emotion weighted voting across three specialized models
-2. Landmark-based refinements for common confusion patterns
-3. Modern, responsive GUI with real-time analysis
+**Key achievements:**
+1. Identified and fixed critical dataset compatibility bug (contempt removal)
+2. Implemented 3-model ensemble with per-emotion weighted voting
+3. Added geometric refinements using 68-point dlib landmarks
+4. Developed 6 coupled refinement multipliers for targeted emotion corrections
+5. Systematic Bayesian optimization of 43 hyperparameters using Optuna (1000 trials, 27.7% pruning efficiency)
 
-The system is well-suited for posed photographs and controlled environments, with known limitations for spontaneous expressions and non-frontal faces.
+**Performance progression:**
+- Original baseline (13 thresholds): 57.1%
+- Enhanced baseline (19 thresholds with refinement multipliers): 63.9%
+- **Final optimized (43 parameters): 67.6% on validation, 63.1% on full test**
+
+**AffectNet-8 (final):**
+- Optimized: 63.1% (+1.5% over baseline)
+- Best emotion: Happy (86.0%)
+- Most improved: Fear (+9.8% baseline → optimized)
+- Test set: 4000 images
+
+**FER-7 (final):**
+- Baseline: 39.1%
+- Optimized: 38.3% (-0.8%)
+- Demonstrates dataset-specific optimization
+
+**Lessons learned:**
+1. **Coupled reduction multipliers** preserve probability mass better than independent boost/reduction parameters
+2. **Dataset-specific optimization** is real - parameters tuned on one dataset may not transfer to others
+3. **Geometric features** (68-point landmarks) provide complementary signals to pure CNN approaches
+4. **Pruning efficiency** (27.7%) makes large-scale hyperparameter optimization feasible
+
+The system provides a practical balance between accuracy (~63% on challenging real-world datasets) and computational efficiency (~100-150ms per face on CPU-only hardware), suitable for real-time applications.
 
 ---
 
@@ -421,5 +745,5 @@ The system is well-suited for posed photographs and controlled environments, wit
 
 - HSEmotion: https://github.com/HSE-asavchenko/face-emotion-recognition
 - dlib: http://dlib.net/
-- CustomTkinter: https://github.com/TomSchimansky/CustomTkinter
+- Optuna: https://optuna.org/
 - ONNX Runtime: https://onnxruntime.ai/

@@ -1,0 +1,59 @@
+ensemble_weights:
+  anger:
+    enet_b2: 0.3
+    vgaf: 0.2
+    afew: 0.5
+  contempt:
+    enet_b2: 0.4
+    vgaf: 0.3
+    afew: 0.3
+  disgust:
+    enet_b2: 0.3
+    vgaf: 0.2
+    afew: 0.5
+  fear:
+    enet_b2: 0.2
+    vgaf: 0.3
+    afew: 0.5
+  happy:
+    enet_b2: 0.5
+    vgaf: 0.3
+    afew: 0.2
+  neutral:
+    enet_b2: 0.5
+    vgaf: 0.3
+    afew: 0.2
+  sad:
+    enet_b2: 0.3
+    vgaf: 0.5
+    afew: 0.2
+  surprise:
+    enet_b2: 0.3
+    vgaf: 0.5
+    afew: 0.2
+thresholds:
+  # Original 13
+  head_pose_left: -0.15
+  head_pose_right: 0.15
+  mouth_open: 0.12
+  mouth_wide_open: 0.18
+  mouth_closed: 0.05
+  corners_upturned: -0.03
+  corners_downturned: 0.05
+  fear_surprise_diff: 35
+  fear_surprise_close: 15
+  sad_angry_diff: 25
+  sad_angry_intensity: 20
+  angry_sad_diff: 10
+  ambiguous_gap: 12
+  # 6 refinement multipliers (NEW baseline - 63.9%)
+  happy_lowconf_mult: 1.3
+  happy_lowconf_cap: 85
+  fear2surprise_boost_mult: 0.8
+  surprise2fear_boost_mult: 0.2
+  disgust2angry_boost_mult: 0.3
+  sad2angry_mouth_boost_mult: 0.35
+metadata:
+  description: "NEW baseline with 19 thresholds (13 original + 6 refinement multipliers)"
+  accuracy: 0.639
+  accuracy_percent: 63.9

@@ -11,7 +11,7 @@ from hsemotion_onnx.facial_emotions import HSEmotionRecognizer
 
 # Emotion descriptions (simplified)
 EMOTION_DESCRIPTIONS = {
-    'angry': 'anger or frustration',
+    'anger': 'anger or frustration',
     'disgust': 'disgust or displeasure',
     'fear': 'fear or anxiety',
     'happy': 'happiness or joy',
@@ -21,14 +21,14 @@ EMOTION_DESCRIPTIONS = {
     'contempt': 'contempt or disdain'
 }
 
-EMOTION_LABELS = ['angry', 'contempt', 'disgust', 'fear', 'happy', 'neutral', 'sad', 'surprise']
+EMOTION_LABELS = ['anger', 'contempt', 'disgust', 'fear', 'happy', 'neutral', 'sad', 'surprise']
 
 # Per-emotion weights based on model strengths
 # enet_b2: Best overall, especially Happy/Neutral
 # vgaf: Better at natural expressions (Sad, Surprise)
 # afew: Better at acted expressions (Fear, Angry, Disgust)
 EMOTION_WEIGHTS = {
-    'angry':    {'enet_b2': 0.3, 'vgaf': 0.2, 'afew': 0.5},
+    'anger':    {'enet_b2': 0.3, 'vgaf': 0.2, 'afew': 0.5},
     'contempt': {'enet_b2': 0.4, 'vgaf': 0.3, 'afew': 0.3},
     'disgust':  {'enet_b2': 0.3, 'vgaf': 0.2, 'afew': 0.5},
     'fear':     {'enet_b2': 0.2, 'vgaf': 0.3, 'afew': 0.5},
@@ -65,14 +65,32 @@ THRESHOLDS = {
 
     # Ambiguity detection
     'ambiguous_gap': 12,
+
+    # ========== REFINEMENT BOOST MULTIPLIERS (6 parameters to optimize) ==========
+
+    # Happy low-confidence boost (CRITICAL - Happy is most important emotion)
+    # Only boosts when confidence is LOW (<50%), never caps high confidence
+    'happy_lowconf_mult': 1.3,            # happy = min(happy * this, cap)
+    'happy_lowconf_cap': 85,              # cap: 80-100 (don't limit strong predictions)
+
+    # Fear ↔ Surprise (coupled: same mult for boost AND reduction)
+    'fear2surprise_boost_mult': 0.8,     # boost = min(40, fear * this), reduction uses same
+    'surprise2fear_boost_mult': 0.2,     # boost = min(10, surprise * this), reduction uses same
+
+    # Disgust → Angry (disgust is subtler, gets overpowered by anger)
+    'disgust2angry_boost_mult': 0.3,     # boost = min(15, disgust * this), reduction uses same
+
+    # Sad → Angry (mouth check only)
+    'sad2angry_mouth_boost_mult': 0.35,  # boost = min(18, sad * this), reduction uses same
 }
 
 
 class EmotionAnalyzer:
     """3-model ensemble emotion analyzer with dlib landmarks."""
 
-    def __init__(self, use_ensemble: bool = True):
+    def __init__(self, use_ensemble: bool = True, enable_contempt: bool = True):
         self.use_ensemble = use_ensemble
+        self.enable_contempt = enable_contempt
 
         # dlib face detector and 68-point landmark predictor
         print("Loading dlib face detector...")
@@ -316,105 +334,67 @@ class EmotionAnalyzer:
         second_emotion = sorted_emo[1][0] if len(sorted_emo) > 1 else None
         second_score = sorted_emo[1][1] if len(sorted_emo) > 1 else 0
 
-        # FEAR vs SURPRISE refinement
-        # Surprise: typically open mouth, raised eyebrows, relaxed
-        # Fear: similar but more tension, eyes wider relative to mouth
-        # BIAS: Surprise is MUCH more common in photos than genuine fear
-        # NOTE: mouth_ratio is lip_gap/mouth_width (0=closed, 0.2+=slightly open, 0.4+=wide open)
+        # ========== FEAR vs SURPRISE (COUPLED) ==========
+        # COUPLED: boost_mult controls BOTH boost and reduction
         if top_emotion == 'fear' and emotions.get('surprise', 0) > 8:
             mouth_ratio = self._analyze_mouth_opening(landmarks) if landmarks is not None else 0.1
 
             # ANY mouth opening suggests surprise over fear
             if mouth_ratio > THRESHOLDS['mouth_open']:
-                boost = min(40, emotions['fear'] * 0.8)
+                mult = THRESHOLDS['fear2surprise_boost_mult']
+                boost = min(40, emotions['fear'] * mult)
                 refined['surprise'] = emotions['surprise'] + boost
-                refined['fear'] = emotions['fear'] - boost * 0.9
+                refined['fear'] = emotions['fear'] - boost * mult  # COUPLED: same mult
 
             # Strong bias toward surprise - fear is rare in posed photos
             fear_surprise_diff = emotions['fear'] - emotions['surprise']
             if fear_surprise_diff < THRESHOLDS['fear_surprise_diff']:
-                # Always bias toward surprise when close
-                bias = 20 if fear_surprise_diff < THRESHOLDS['fear_surprise_close'] else 15
+                # Generic bias (hardcoded 10)
+                bias = 10 if fear_surprise_diff < THRESHOLDS['fear_surprise_close'] else 10
                 refined['surprise'] = refined.get('surprise', emotions['surprise']) + bias
-                refined['fear'] = refined.get('fear', emotions['fear']) - bias * 0.7
+                refined['fear'] = refined.get('fear', emotions['fear']) - bias  # No multiplier on bias
 
-        # SURPRISE detected but might be fear - be VERY conservative (fear is rare)
+        # ========== SURPRISE detected but might be fear (COUPLED) ==========
+        # COUPLED: boost_mult controls BOTH boost and reduction
         if top_emotion == 'surprise' and emotions.get('fear', 0) > 35:
             mouth_ratio = self._analyze_mouth_opening(landmarks) if landmarks is not None else 0.1
 
             # Only flip to fear if mouth is CLEARLY closed AND fear score is very high
             if mouth_ratio < THRESHOLDS['mouth_closed'] and emotions['fear'] > 45:
-                boost = min(10, emotions['surprise'] * 0.2)
+                mult = THRESHOLDS['surprise2fear_boost_mult']
+                boost = min(10, emotions['surprise'] * mult)
                 refined['fear'] = emotions['fear'] + boost
-                refined['surprise'] = emotions['surprise'] - boost * 0.3
+                refined['surprise'] = emotions['surprise'] - boost * mult  # COUPLED: same mult
 
-        # HAPPY with low confidence - boost if clearly smiling
+        # ========== HAPPY low-confidence boost (OPTIMIZED) ==========
         if top_emotion == 'happy' and top_score < 50:
-            # If happy is top and second is far behind, boost confidence
             if second_score < top_score * 0.7:
-                refined['happy'] = min(75, emotions['happy'] * 1.3)
+                refined['happy'] = min(THRESHOLDS['happy_lowconf_cap'], emotions['happy'] * THRESHOLDS['happy_lowconf_mult'])
 
-        # ANGRY vs DISGUST refinement
-        # Disgust: upper lip raised, mouth typically compressed
-        # Angry: normal mouth position, more symmetric face
-        # NOTE: mouth_ratio is now lip_gap/mouth_width (0=closed, 0.3+=open)
-        if top_emotion in ['angry', 'disgust'] and landmarks is not None:
+        # ========== DISGUST vs ANGRY (COUPLED) ==========
+        # Disgust is subtler (nose wrinkle), gets overpowered by Anger
+        # COUPLED: boost_mult controls BOTH boost and reduction
+        if top_emotion == 'disgust' and emotions.get('anger', 0) > 15 and landmarks is not None:
             mouth_ratio = self._analyze_mouth_opening(landmarks)
+            # Wide mouth suggests anger, not disgust
+            if mouth_ratio > THRESHOLDS['mouth_wide_open']:
+                mult = THRESHOLDS['disgust2angry_boost_mult']
+                boost = min(15, emotions['disgust'] * mult)
+                refined['anger'] = emotions['anger'] + boost
+                refined['disgust'] = emotions['disgust'] - boost * mult  # COUPLED: same mult
 
-            # Disgust typically has closed/compressed mouth (upper lip raised)
-            if top_emotion == 'angry' and emotions.get('disgust', 0) > 15:
-                if mouth_ratio < THRESHOLDS['mouth_open']:
-                    boost = min(15, emotions['angry'] * 0.3)
-                    refined['disgust'] = emotions['disgust'] + boost
-                    refined['angry'] = emotions['angry'] - boost * 0.5
-
-            if top_emotion == 'disgust' and emotions.get('angry', 0) > 15:
-                if mouth_ratio > THRESHOLDS['mouth_wide_open']:
-                    boost = min(15, emotions['disgust'] * 0.3)
-                    refined['angry'] = emotions['angry'] + boost
-                    refined['disgust'] = emotions['disgust'] - boost * 0.5
-
-        # SAD vs ANGRY refinement (enhanced with intensity + mouth corners)
-        # Sad is often confused with Angry because both have furrowed brows
-        # Key differences:
-        # - Angry has tension/intensity, tighter face muscles
-        # - Angry has neutral/tense mouth, Sad has clearly downturned mouth
-        # BIAS: In posed photos, angry is more common than genuine sadness
-        if top_emotion == 'sad' and emotions.get('angry', 0) > 12:
-            sad_angry_diff = emotions['sad'] - emotions['angry']
+        # ========== SAD vs ANGRY (MOUTH CHECK ONLY, COUPLED) ==========
+        # COUPLED: boost_mult controls BOTH boost and reduction
+        if top_emotion == 'sad' and emotions.get('anger', 0) > 12:
             mouth_corners = self._analyze_mouth_corners(landmarks) if landmarks is not None else "neutral"
+            sad_angry_diff = emotions['sad'] - emotions['anger']
 
-            # INTENSITY CHECK: Low-confidence sad → probably angry
-            # Angry expressions are typically more intense/confident looking
-            if top_score < 60 and sad_angry_diff < THRESHOLDS['sad_angry_intensity']:
-                boost = min(20, emotions['sad'] * 0.4)
-                refined['angry'] = emotions['angry'] + boost
-                refined['sad'] = emotions['sad'] - boost * 0.7
-
-            # MOUTH CORNER CHECK: If mouth is NOT clearly downturned → probably angry
-            # Only keep as sad if mouth is clearly drooping
+            # MOUTH CORNER CHECK: If NOT downturned → probably angry
             if mouth_corners != "downturned" and sad_angry_diff < THRESHOLDS['sad_angry_diff']:
-                boost = min(18, emotions['sad'] * 0.35)
-                refined['angry'] = emotions['angry'] + boost
-                refined['sad'] = emotions['sad'] - boost * 0.6
-
-            # ANGRY CLUSTER CHECK: If disgust is also present, suggests anger family
-            if emotions.get('disgust', 0) > 10 and sad_angry_diff < THRESHOLDS['sad_angry_intensity']:
-                boost = min(12, emotions['sad'] * 0.25)
-                refined['angry'] = emotions['angry'] + boost
-                refined['sad'] = emotions['sad'] - boost * 0.5
-
-        # ANGRY mistaken as SAD - only flip if mouth is CLEARLY downturned
-        if top_emotion == 'angry' and emotions.get('sad', 0) > 25:
-            mouth_corners = self._analyze_mouth_corners(landmarks) if landmarks is not None else "neutral"
-
-            # Only flip to sad if mouth is clearly downturned AND scores are close
-            if mouth_corners == "downturned":
-                angry_sad_diff = emotions['angry'] - emotions['sad']
-                if angry_sad_diff < THRESHOLDS['angry_sad_diff']:
-                    boost = min(8, emotions['angry'] * 0.15)
-                    refined['sad'] = emotions['sad'] + boost
-                    refined['angry'] = emotions['angry'] - boost * 0.3
+                mult = THRESHOLDS['sad2angry_mouth_boost_mult']
+                boost = min(18, emotions['sad'] * mult)
+                refined['anger'] = emotions['anger'] + boost
+                refined['sad'] = emotions['sad'] - boost * mult  # COUPLED: same mult
 
         # Normalize to 100%
         total = sum(refined.values())
@@ -422,6 +402,49 @@ class EmotionAnalyzer:
             refined = {k: (v / total) * 100 for k, v in refined.items()}
 
         return refined
+
+    def _remove_contempt_and_renormalize(self, emotions: dict) -> dict:
+        """
+        Remove contempt emotion and redistribute its probability mass to 7 emotions.
+
+        The ensemble models output 8 emotions including contempt, but FER2013
+        uses only 7 emotions. This removes contempt and redistributes its mass
+        proportionally to other emotions based on their current scores.
+        """
+        # If no contempt, return as-is
+        if 'contempt' not in emotions:
+            return emotions
+
+        # Get contempt mass
+        contempt_mass = emotions['contempt']
+        del emotions['contempt']
+
+        # Get remaining 7 emotions
+        seven_emotions = ['angry', 'disgust', 'fear', 'happy', 'neutral', 'sad', 'surprise']
+        remaining_emotions = {k: v for k, v in emotions.items() if k in seven_emotions}
+
+        # Calculate total mass of 7 emotions
+        total_mass = sum(remaining_emotions.values())
+
+        if total_mass > 0:
+            # Redistribute contempt mass proportionally
+            for emotion in seven_emotions:
+                if emotion in remaining_emotions:
+                    # Proportional share based on current score
+                    proportion = remaining_emotions[emotion] / total_mass
+                    remaining_emotions[emotion] += contempt_mass * proportion
+
+            # Renormalize to 100%
+            new_total = sum(remaining_emotions.values())
+            if new_total > 0:
+                remaining_emotions = {k: (v / new_total) * 100 for k, v in remaining_emotions.items()}
+        else:
+            # All 7 emotions have 0 score, distribute evenly
+            even_share = contempt_mass / 7
+            for emotion in seven_emotions:
+                remaining_emotions[emotion] = emotions.get(emotion, 0) + even_share
+
+        return remaining_emotions
 
     def analyze_image(self, image: np.ndarray, smooth: bool = False,
                       reject_low_confidence: bool = False) -> List[Dict]:
@@ -499,6 +522,10 @@ class EmotionAnalyzer:
 
                 # Apply refinements
                 emotions = self._refine_emotions(emotions, face_landmarks)
+
+                # Remove contempt and redistribute to 7 emotions (only for FER/7-emotion datasets)
+                if not self.enable_contempt:
+                    emotions = self._remove_contempt_and_renormalize(emotions)
 
                 # Apply temporal smoothing for video/webcam mode
                 if smooth:
