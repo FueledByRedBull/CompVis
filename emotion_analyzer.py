@@ -7,6 +7,7 @@ import numpy as np
 import cv2
 import dlib
 import os
+import yaml
 from hsemotion_onnx.facial_emotions import HSEmotionRecognizer
 
 # Emotion descriptions (simplified)
@@ -23,11 +24,8 @@ EMOTION_DESCRIPTIONS = {
 
 EMOTION_LABELS = ['anger', 'contempt', 'disgust', 'fear', 'happy', 'neutral', 'sad', 'surprise']
 
-# Per-emotion weights based on model strengths
-# enet_b2: Best overall, especially Happy/Neutral
-# vgaf: Better at natural expressions (Sad, Surprise)
-# afew: Better at acted expressions (Fear, Angry, Disgust)
-EMOTION_WEIGHTS = {
+# Default weights (will be overridden by YAML if available)
+DEFAULT_EMOTION_WEIGHTS = {
     'anger':    {'enet_b2': 0.3, 'vgaf': 0.2, 'afew': 0.5},
     'contempt': {'enet_b2': 0.4, 'vgaf': 0.3, 'afew': 0.3},
     'disgust':  {'enet_b2': 0.3, 'vgaf': 0.2, 'afew': 0.5},
@@ -41,8 +39,8 @@ EMOTION_WEIGHTS = {
 HIGH_CONFIDENCE = 60.0
 MEDIUM_CONFIDENCE = 40.0
 
-# Detection thresholds (normalized values for scale-invariance)
-THRESHOLDS = {
+# Default thresholds (will be overridden by YAML if available)
+DEFAULT_THRESHOLDS = {
     # Head pose detection (nose offset / eye distance)
     'head_pose_left': -0.15,
     'head_pose_right': 0.15,
@@ -85,12 +83,78 @@ THRESHOLDS = {
 }
 
 
+def _load_config_from_yaml(config_path: str) -> tuple:
+    """Load emotion weights and thresholds from YAML config file.
+
+    Returns:
+        tuple: (emotion_weights, thresholds) dicts
+    """
+    if not os.path.exists(config_path):
+        print(f"Config file not found: {config_path}, using defaults")
+        return DEFAULT_EMOTION_WEIGHTS.copy(), DEFAULT_THRESHOLDS.copy()
+
+    try:
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+
+        emotion_weights = config.get('ensemble_weights', DEFAULT_EMOTION_WEIGHTS)
+        thresholds = config.get('thresholds', DEFAULT_THRESHOLDS)
+
+        # Map emotion names to match code convention
+        emotion_name_map = {
+            'happy': 'happy',
+            'sad': 'sad',
+            'surprise': 'surprise',
+            'fear': 'fear',
+            'anger': 'anger',
+            'disgust': 'disgust',
+            'neutral': 'neutral',
+            'contempt': 'contempt'
+        }
+
+        # Normalize emotion weights keys
+        normalized_weights = {}
+        for emo, weights in emotion_weights.items():
+            key = emotion_name_map.get(emo, emo)
+            normalized_weights[key] = weights
+
+        print(f"Loaded config from {config_path}")
+        if 'metadata' in config:
+            meta = config['metadata']
+            print(f"  - Tuned on: {meta.get('tuned_on', 'N/A')}")
+            print(f"  - Optimized accuracy: {meta.get('optimized_accuracy', 'N/A')}")
+            print(f"  - Improvement: {meta.get('improvement', 'N/A')}")
+
+        return normalized_weights, thresholds
+
+    except Exception as e:
+        print(f"Error loading config from {config_path}: {e}, using defaults")
+        return DEFAULT_EMOTION_WEIGHTS.copy(), DEFAULT_THRESHOLDS.copy()
+
+
 class EmotionAnalyzer:
     """3-model ensemble emotion analyzer with dlib landmarks."""
 
-    def __init__(self, use_ensemble: bool = True, enable_contempt: bool = True):
+    def __init__(self, use_ensemble: bool = True, enable_contempt: bool = True,
+                 config_path: str = None):
+        """
+        Initialize the EmotionAnalyzer.
+
+        Args:
+            use_ensemble: Whether to use ensemble of 3 models or single enet_b2
+            enable_contempt: Whether to include contempt in predictions (8 emotions vs 7)
+            config_path: Path to YAML config file with optimized weights and thresholds.
+                        If None, looks for optimized_parameters_affectnet.yaml in script dir.
+        """
         self.use_ensemble = use_ensemble
         self.enable_contempt = enable_contempt
+
+        # Load config from YAML if available
+        if config_path is None:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            config_path = os.path.join(script_dir, "optimized_parameters_affectnet.yaml")
+
+        self.EMOTION_WEIGHTS, self.THRESHOLDS = _load_config_from_yaml(config_path)
 
         # dlib face detector and 68-point landmark predictor
         print("Loading dlib face detector...")
@@ -197,7 +261,7 @@ class EmotionAnalyzer:
             weighted_sum = 0.0
             weight_total = 0.0
             for model_name, scores in model_scores.items():
-                weight = EMOTION_WEIGHTS[emotion].get(model_name, 0.33)
+                weight = self.EMOTION_WEIGHTS.get(emotion, {}).get(model_name, 0.33)
                 weighted_sum += scores[emotion] * weight
                 weight_total += weight
             ensemble_scores[emotion] = weighted_sum / weight_total if weight_total > 0 else 0
@@ -274,9 +338,9 @@ class EmotionAnalyzer:
         nose_offset = (nose_tip[0] - eye_center[0]) / eye_dist
 
         # Thresholds for pose detection
-        if nose_offset < THRESHOLDS['head_pose_left']:
+        if nose_offset < self.THRESHOLDS['head_pose_left']:
             return "turned left"
-        elif nose_offset > THRESHOLDS['head_pose_right']:
+        elif nose_offset > self.THRESHOLDS['head_pose_right']:
             return "turned right"
         return "facing camera"
 
@@ -313,9 +377,9 @@ class EmotionAnalyzer:
         # Thresholds based on 68-point landmark geometry
         # Negative offset = corners above center = smile
         # Positive offset = corners below center = frown
-        if normalized_offset < THRESHOLDS['corners_upturned']:
+        if normalized_offset < self.THRESHOLDS['corners_upturned']:
             return "upturned"
-        elif normalized_offset > THRESHOLDS['corners_downturned']:
+        elif normalized_offset > self.THRESHOLDS['corners_downturned']:
             return "downturned"
         else:
             return "neutral"
@@ -340,17 +404,17 @@ class EmotionAnalyzer:
             mouth_ratio = self._analyze_mouth_opening(landmarks) if landmarks is not None else 0.1
 
             # ANY mouth opening suggests surprise over fear
-            if mouth_ratio > THRESHOLDS['mouth_open']:
-                mult = THRESHOLDS['fear2surprise_boost_mult']
+            if mouth_ratio > self.THRESHOLDS['mouth_open']:
+                mult = self.THRESHOLDS['fear2surprise_boost_mult']
                 boost = min(40, emotions['fear'] * mult)
                 refined['surprise'] = emotions['surprise'] + boost
                 refined['fear'] = emotions['fear'] - boost * mult  # COUPLED: same mult
 
             # Strong bias toward surprise - fear is rare in posed photos
             fear_surprise_diff = emotions['fear'] - emotions['surprise']
-            if fear_surprise_diff < THRESHOLDS['fear_surprise_diff']:
+            if fear_surprise_diff < self.THRESHOLDS['fear_surprise_diff']:
                 # Generic bias (hardcoded 10)
-                bias = 10 if fear_surprise_diff < THRESHOLDS['fear_surprise_close'] else 10
+                bias = 10 if fear_surprise_diff < self.THRESHOLDS['fear_surprise_close'] else 10
                 refined['surprise'] = refined.get('surprise', emotions['surprise']) + bias
                 refined['fear'] = refined.get('fear', emotions['fear']) - bias  # No multiplier on bias
 
@@ -360,8 +424,8 @@ class EmotionAnalyzer:
             mouth_ratio = self._analyze_mouth_opening(landmarks) if landmarks is not None else 0.1
 
             # Only flip to fear if mouth is CLEARLY closed AND fear score is very high
-            if mouth_ratio < THRESHOLDS['mouth_closed'] and emotions['fear'] > 45:
-                mult = THRESHOLDS['surprise2fear_boost_mult']
+            if mouth_ratio < self.THRESHOLDS['mouth_closed'] and emotions['fear'] > 45:
+                mult = self.THRESHOLDS['surprise2fear_boost_mult']
                 boost = min(10, emotions['surprise'] * mult)
                 refined['fear'] = emotions['fear'] + boost
                 refined['surprise'] = emotions['surprise'] - boost * mult  # COUPLED: same mult
@@ -369,7 +433,7 @@ class EmotionAnalyzer:
         # ========== HAPPY low-confidence boost (OPTIMIZED) ==========
         if top_emotion == 'happy' and top_score < 50:
             if second_score < top_score * 0.7:
-                refined['happy'] = min(THRESHOLDS['happy_lowconf_cap'], emotions['happy'] * THRESHOLDS['happy_lowconf_mult'])
+                refined['happy'] = min(self.THRESHOLDS['happy_lowconf_cap'], emotions['happy'] * self.THRESHOLDS['happy_lowconf_mult'])
 
         # ========== DISGUST vs ANGRY (COUPLED) ==========
         # Disgust is subtler (nose wrinkle), gets overpowered by Anger
@@ -377,8 +441,8 @@ class EmotionAnalyzer:
         if top_emotion == 'disgust' and emotions.get('anger', 0) > 15 and landmarks is not None:
             mouth_ratio = self._analyze_mouth_opening(landmarks)
             # Wide mouth suggests anger, not disgust
-            if mouth_ratio > THRESHOLDS['mouth_wide_open']:
-                mult = THRESHOLDS['disgust2angry_boost_mult']
+            if mouth_ratio > self.THRESHOLDS['mouth_wide_open']:
+                mult = self.THRESHOLDS['disgust2angry_boost_mult']
                 boost = min(15, emotions['disgust'] * mult)
                 refined['anger'] = emotions['anger'] + boost
                 refined['disgust'] = emotions['disgust'] - boost * mult  # COUPLED: same mult
@@ -390,8 +454,8 @@ class EmotionAnalyzer:
             sad_angry_diff = emotions['sad'] - emotions['anger']
 
             # MOUTH CORNER CHECK: If NOT downturned → probably angry
-            if mouth_corners != "downturned" and sad_angry_diff < THRESHOLDS['sad_angry_diff']:
-                mult = THRESHOLDS['sad2angry_mouth_boost_mult']
+            if mouth_corners != "downturned" and sad_angry_diff < self.THRESHOLDS['sad_angry_diff']:
+                mult = self.THRESHOLDS['sad2angry_mouth_boost_mult']
                 boost = min(18, emotions['sad'] * mult)
                 refined['anger'] = emotions['anger'] + boost
                 refined['sad'] = emotions['sad'] - boost * mult  # COUPLED: same mult
@@ -647,7 +711,7 @@ class EmotionAnalyzer:
             confidence_level = 'low'
 
         experience = EMOTION_DESCRIPTIONS.get(dominant_emotion, dominant_emotion)
-        is_ambiguous = (dominant_score - secondary_score) < THRESHOLDS['ambiguous_gap'] and secondary_score > 20
+        is_ambiguous = (dominant_score - secondary_score) < self.THRESHOLDS['ambiguous_gap'] and secondary_score > 20
 
         return {
             'face_number': face_number,
