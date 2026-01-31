@@ -587,7 +587,11 @@ The optimized system was evaluated on two datasets: **AffectNet-8** (8 emotions 
 
 #### Confusion Matrix Analysis
 
-![Confusion matrices saved to output_folder/](output_folder/confusion_matrix_*.png)
+**Baseline Confusion Matrix (AffectNet-8):**
+![Baseline AffectNet Confusion Matrix](output_folder/confusion_matrix_baseline_affectnet.png)
+
+**Optimized Confusion Matrix (AffectNet-8):**
+![Optimized AffectNet Confusion Matrix](output_folder/confusion_matrix_optimized_affectnet.png)
 
 The confusion matrices reveal several patterns:
 - **Fear/Surprise confusion**: Significantly reduced through coupled refinement multipliers
@@ -651,14 +655,19 @@ The AffectNet-optimized parameters perform **worse** on FER than the baseline pa
 
 ### Confusion Matrix Analysis
 
-Confusion matrices were generated for all four combinations and saved to `output_folder/`:
+Confusion matrices were generated for all four combinations:
 
-| File | Description |
-|------|-------------|
-| `confusion_matrix_baseline_fer.png` | FER baseline (39.1%) |
-| `confusion_matrix_baseline_affectnet.png` | AffectNet baseline (61.6%) |
-| `confusion_matrix_optimized_fer.png` | FER optimized (38.3%) |
-| `confusion_matrix_optimized_affectnet.png` | AffectNet optimized (63.1%) |
+**FER-7 Baseline (39.1%):**
+![Baseline FER Confusion Matrix](output_folder/confusion_matrix_baseline_fer.png)
+
+**FER-7 Optimized (38.3%):**
+![Optimized FER Confusion Matrix](output_folder/confusion_matrix_optimized_fer.png)
+
+**AffectNet-8 Baseline (61.6%):**
+![Baseline AffectNet Confusion Matrix](output_folder/confusion_matrix_baseline_affectnet.png)
+
+**AffectNet-8 Optimized (63.1%):**
+![Optimized AffectNet Confusion Matrix](output_folder/confusion_matrix_optimized_affectnet.png)
 
 **Key observations from confusion matrices:**
 
