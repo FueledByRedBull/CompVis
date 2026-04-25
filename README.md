@@ -29,6 +29,10 @@ A real-time facial expression analysis system using a 3-model ensemble approach 
 | Neutral | Calm, neutral state |
 | Contempt | Contempt, disdain |
 
+## Privacy and Consent
+
+Run webcam and image analysis only on media you are allowed to process. Emotion labels are model estimates, not clinical or identity claims, and should not be used for high-stakes decisions.
+
 ---
 
 ## Quick Start
